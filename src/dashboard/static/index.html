@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Execution Dashboard</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117; --panel: #161b22; --panel2: #11151c; --line: #21262d;
+    --text: #e6edf3; --muted: #8b949e; --green: #3fb950; --red: #f85149;
+    --amber: #d29922; --blue: #58a6ff; --accent: #1f6feb;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); margin: 0;
+         font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .num { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+
+  /* ---- top bar ------------------------------------------------------- */
+  header { position: sticky; top: 0; z-index: 10; background: var(--panel2);
+           border-bottom: 1px solid var(--line); padding: 10px 18px;
+           display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; white-space: nowrap; }
+  .chips { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .chip { padding: 2px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 650; }
+  .ok   { background: #11301c; color: var(--green); }
+  .bad  { background: #3d1418; color: var(--red); }
+  .warn { background: #3a2d12; color: var(--amber); }
+  .dim  { background: #1c2128; color: var(--muted); font-weight: 500; }
+  .spacer { flex: 1; }
+  .ctl { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  button { background: #21262d; color: var(--text); border: 1px solid #30363d;
+           border-radius: 6px; padding: 4px 11px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #30363d; }
+  button.danger { border-color: #6e2024; color: var(--red); }
+  button.danger:hover { background: #3d1418; }
+  button.primary { border-color: var(--accent); color: var(--blue); }
+
+  /* ---- tabs ---------------------------------------------------------- */
+  nav { display: flex; gap: 2px; padding: 0 18px; background: var(--panel2);
+        border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: none; border-bottom: 2px solid transparent;
+               border-radius: 0; padding: 9px 16px; color: var(--muted); font-size: 13px; }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  nav button:hover { background: none; color: var(--text); }
+
+  main { padding: 16px 18px 40px; max-width: 1280px; margin: 0 auto; }
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+
+  h2 { font-size: 12px; margin: 22px 0 8px; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .07em; font-weight: 650; }
+  h2:first-child { margin-top: 4px; }
+
+  /* ---- cards --------------------------------------------------------- */
+  .cards { display: flex; gap: 10px; flex-wrap: wrap; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 10px 14px; min-width: 150px; }
+  .card .k { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .card .v { font-size: 19px; font-weight: 700; }
+  .card .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .card.total { border-color: #30363d; background: var(--panel2); }
+  .card.total .v { font-size: 24px; }
+
+  /* ---- compact daily PnL strip (Live tab) ----------------------------- */
+  .pnlstrip { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+              background: var(--panel); border: 1px solid var(--line);
+              border-radius: 8px; padding: 8px 14px; }
+  .pnlstrip .big { font-size: 18px; font-weight: 700; }
+  .pnlstrip .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase;
+                   letter-spacing: .05em; }
+  .pnlstrip .sub { font-size: 11.5px; color: var(--muted); }
+  .pnlstrip .schip { font-size: 11px; padding: 1px 8px; border-radius: 999px;
+                     background: var(--panel2); border: 1px solid var(--line); }
+  .pnlstrip a { color: var(--blue); font-size: 11.5px; text-decoration: none;
+                margin-left: auto; cursor: pointer; }
+
+  /* ---- tables -------------------------------------------------------- */
+  .tablewrap { background: var(--panel); border: 1px solid var(--line);
+               border-radius: 8px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line);
+           font-size: 12.5px; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  th { color: var(--muted); font-weight: 600; background: var(--panel2);
+       position: sticky; top: 0; font-size: 11px; text-transform: uppercase;
+       letter-spacing: .04em; }
+  td.r, th.r { text-align: right; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .side { padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 650; }
+  .side.BUY { background: #11301c; color: var(--green); }
+  .side.SELL { background: #3d1418; color: var(--red); }
+  .empty { color: var(--muted); padding: 14px; font-size: 13px; }
+  .reason { padding: 1px 8px; border-radius: 4px; background: #1c2128;
+            color: var(--muted); font-size: 11px; }
+  .reason.stop_loss { color: var(--red); background: #3d1418; }
+  .reason.take_profit { color: var(--green); background: #11301c; }
+  .reason.time_exit { color: var(--blue); background: #14283d; }
+  .reason.manual, .reason.force_flatten { color: var(--amber); background: #3a2d12; }
+
+  input.param { width: 62px; background: var(--bg); color: var(--text);
+                border: 1px solid #30363d; border-radius: 4px; padding: 3px 6px;
+                font-size: 12px; }
+  input.param:focus { border-color: var(--accent); outline: none; }
+
+  /* ---- activity ------------------------------------------------------ */
+  .logbox { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            padding: 10px 12px; max-height: 320px; overflow-y: auto;
+            font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; line-height: 1.6; }
+  .logbox .err { color: #ff7b72; } .logbox .wrn { color: var(--amber); }
+  .evt b { color: var(--blue); font-weight: 600; }
+  .ts { color: var(--muted); }
+  #conn { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Execution System</h1>
+  <div class="chips" id="sysstatus"></div>
+  <div class="spacer"></div>
+  <span id="conn"></span>
+  <div class="ctl">
+    <button class="danger" onclick="cmd('flatten_all', {}, 'FLATTEN ALL positions?')">Flatten All</button>
+    <button onclick="cmd('lock_system', {}, 'LOCK the system? (blocks new entries; exits keep running)')">Lock</button>
+    <button class="primary" onclick="cmd('unlock_system', {}, 'Unlock? Reconciles first; only unlocks if clean.')">Unlock</button>
+    <button onclick="cmd('restart_runner', {}, 'Restart the runner? (supervisor relaunches it)')">Restart</button>
+    <button class="danger" onclick="cmd('shutdown_runner', {}, 'SHUT DOWN the runner permanently?')">Shutdown</button>
+  </div>
+</header>
+
+<nav>
+  <button id="tab-live" class="active" onclick="showTab('live')">Live</button>
+  <button id="tab-pnl" onclick="showTab('pnl')">PnL</button>
+  <button id="tab-activity" onclick="showTab('activity')">Activity</button>
+</nav>
+
+<main>
+
+<!-- ======================= LIVE ======================= -->
+<section class="tab active" id="live">
+  <div class="pnlstrip" id="pnlstrip" style="margin-top:4px"><span class="sub">loading…</span></div>
+
+  <h2>Open Positions</h2>
+  <div class="tablewrap"><table id="positions"><thead><tr>
+    <th>Strategy</th><th>Contract</th><th>Side</th><th class="r">Qty</th>
+    <th class="r">Entry</th><th class="r">Mark</th><th class="r">Unrealized</th>
+    <th class="r">Stop</th><th>Time Exit</th><th></th>
+  </tr></thead><tbody><tr><td colspan="10" class="empty">flat</td></tr></tbody></table></div>
+
+  <h2>Working Orders</h2>
+  <div class="tablewrap"><table id="orders"><thead><tr>
+    <th>Strategy</th><th>Contract</th><th>Side</th><th class="r">Qty</th>
+    <th class="r">Filled</th><th class="r">Limit</th><th>Status</th><th>orderRef</th><th></th>
+  </tr></thead><tbody><tr><td colspan="9" class="empty">none</td></tr></tbody></table></div>
+
+  <h2>Strategy Management <span style="text-transform:none;letter-spacing:0">— edits apply to new positions; persisted to strategy_overrides.yaml</span></h2>
+  <div class="tablewrap"><table id="strategies"><thead><tr>
+    <th>Strategy</th><th>Active</th><th>Paused</th><th>Today</th><th>Entry</th><th>Trig%</th>
+    <th>MaxQty</th><th>SL%</th><th>TP%</th><th>TimeExit</th><th>Size%</th><th>Lev</th><th></th>
+  </tr></thead><tbody></tbody></table></div>
+</section>
+
+<!-- ======================= PNL ======================= -->
+<section class="tab" id="pnl">
+  <div class="cards" style="margin-top:4px" id="pnlsummary"><div class="empty">loading…</div></div>
+
+  <h2>Per strategy</h2>
+  <div class="tablewrap"><table id="pnltable"><thead><tr>
+    <th>Strategy</th><th class="r">Today</th><th class="r">All-time Realized</th>
+    <th class="r">Live Unrealized</th><th class="r">Total</th><th class="r">Closed</th>
+  </tr></thead><tbody></tbody></table></div>
+
+  <h2>By day</h2>
+  <div class="tablewrap"><table id="dailytable"><thead><tr>
+    <th>Date (NY)</th><th class="r">Realized</th><th class="r">Closed Positions</th>
+  </tr></thead><tbody></tbody></table></div>
+
+  <h2>Closed Positions <span style="text-transform:none;letter-spacing:0">— why each position closed</span></h2>
+  <div class="tablewrap"><table id="historytable"><thead><tr>
+    <th>Closed</th><th>Strategy</th><th>Contract</th><th>Side</th><th class="r">Qty</th>
+    <th class="r">Entry</th><th class="r">Realized</th><th>Reason</th>
+  </tr></thead><tbody><tr><td colspan="8" class="empty">none yet</td></tr></tbody></table></div>
+</section>
+
+<!-- ======================= ACTIVITY ======================= -->
+<section class="tab" id="activity">
+  <h2>Errors &amp; Warnings (runner log)</h2>
+  <div class="logbox" id="errlogs"><div class="empty">loading…</div></div>
+
+  <h2>Recent Events</h2>
+  <div class="logbox" id="events"></div>
+
+  <h2>Recent Commands</h2>
+  <div class="tablewrap"><table id="cmdtable"><thead><tr>
+    <th>Time</th><th>Type</th><th>Status</th><th>Result</th>
+  </tr></thead><tbody></tbody></table></div>
+</section>
+
+</main>
+
+<script>
+const fmt = (x, d=2) => x == null ? "—" : Number(x).toFixed(d);
+const pnlClass = x => x > 0 ? "pos" : (x < 0 ? "neg" : "");
+const usd = x => x == null ? "—" : (x < 0 ? "-$" : "$") + Math.abs(Number(x)).toFixed(2);
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+let activeTab = 'live';
+let editing = false;        // freeze strategy table while user types
+const lastHtml = {};        // change-gating: skip identical re-renders
+
+function setHtml(id, html) {  // only touch the DOM when content changed
+  if (lastHtml[id] === html) return;
+  lastHtml[id] = html;
+  document.getElementById(id).innerHTML = html;
+}
+
+function showTab(name) {
+  activeTab = name;
+  document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('active', s.id === name));
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.id === 'tab-' + name));
+  if (name === 'pnl') refreshHistory();
+  if (name === 'activity') refreshActivity();
+}
+
+async function cmd(type, payload, confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  try {
+    await fetch("/api/commands", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({type, payload}),
+    });
+  } catch (e) { console.error(e); }
+}
+
+/* ---------------- live state (websocket, 1s) ---------------- */
+
+function renderState(s) {
+  const sys = s.system || {};
+  const running = (s.status || '').toUpperCase() === 'RUNNING';
+  setHtml("sysstatus",
+    `<span class="chip ${running ? 'ok' : 'bad'}">${esc(s.status || 'OFFLINE')}</span>` +
+    `<span class="chip ${sys.locked ? 'bad' : 'ok'}">${sys.locked ? 'LOCKED' : 'UNLOCKED'}</span>` +
+    (sys.reduce_only ? '<span class="chip warn">REDUCE-ONLY</span>' : '') +
+    (sys.flatten_all_active ? '<span class="chip warn">FLATTENING</span>' : '') +
+    `<span class="chip dim">tick ${s.tick ?? '—'}</span>`);
+
+  if (activeTab !== 'live') return;
+
+  setHtml("positions-body", (s.positions || []).map(p => `<tr>
+    <td>${esc(p.strategy_id)}</td><td class="num">${esc(p.contract)}</td>
+    <td><span class="side ${p.side}">${p.side}</span></td>
+    <td class="r num">${p.quantity}</td><td class="r num">${fmt(p.avg_entry_price)}</td>
+    <td class="r num">${fmt(p.current_price)}</td>
+    <td class="r num ${pnlClass(p.unrealized_pnl)}">${usd(p.unrealized_pnl)}</td>
+    <td class="r num">${fmt(p.stop_price)}</td>
+    <td class="num">${p.time_exit_utc ? esc(p.time_exit_utc.slice(11,16)) + 'Z' : '—'}</td>
+    <td><button class="danger" onclick="cmd('exit_position', {position_id:'${p.position_id}'}, 'Exit ${esc(p.contract)}?')">Exit</button></td>
+  </tr>`).join("") || '<tr><td colspan="10" class="empty">flat</td></tr>');
+
+  setHtml("orders-body", (s.orders || []).map(o => `<tr>
+    <td>${esc(o.strategy_id)}</td><td class="num">${esc(o.contract)}</td>
+    <td><span class="side ${o.side}">${o.side}</span></td>
+    <td class="r num">${o.quantity}</td><td class="r num">${o.filled_quantity}</td>
+    <td class="r num">${fmt(o.limit_price)}</td><td>${esc(o.status)}</td>
+    <td class="num" style="color:var(--muted);font-size:11px">${esc(o.order_ref || '')}</td>
+    <td><button onclick="cmd('cancel_order', {order_id:'${o.order_id}'})">Cancel</button></td>
+  </tr>`).join("") || '<tr><td colspan="9" class="empty">none</td></tr>');
+
+  if (!editing) renderStrategies(s.strategies || [], sys.paused_strategies || []);
+}
+
+function renderStrategies(list, paused) {
+  const inp = (id, key, val, w=58) =>
+    `<input class="param" style="width:${w}px" data-sid="${esc(id)}" data-key="${key}" value="${val ?? ''}"
+       onfocus="editing=true" onblur="setTimeout(()=>{editing=false},250)">`;
+  setHtml("strategies-body", list.map(st => {
+    const p = st.params || {};
+    const isPaused = paused.includes(st.strategy_id);
+    // "Today" cell: done-for-day badge + re-entry switch. Re-entry ON lets a
+    // strategy that already traded today fire again (one-trade/day bypass).
+    const doneChip = st.traded_today ? '<span class="chip dim" title="already traded today">done</span> ' : '';
+    const reentry = `<button class="${st.allow_reentry ? 'primary' : ''}"
+      title="Allow re-entry after a trade today"
+      onclick="cmd('update_strategy', {strategy_id:'${esc(st.strategy_id)}', changes:{allow_reentry:${!st.allow_reentry}}},
+      '${st.allow_reentry ? 'Disable' : 'Enable'} re-entry for ${esc(st.strategy_id)}?')">
+      ${st.allow_reentry ? 'Re-entry ON' : 'Re-entry off'}</button>`;
+    return `<tr>
+      <td>${esc(st.strategy_id)}<div style="color:var(--muted);font-size:10.5px">${esc(st.signal_source)}</div></td>
+      <td><button class="${st.enabled ? 'danger' : ''}"
+        onclick="cmd('update_strategy', {strategy_id:'${esc(st.strategy_id)}', changes:{enabled:${!st.enabled}}},
+        '${st.enabled ? 'DISABLE' : 'ENABLE'} ${esc(st.strategy_id)}?')">${st.enabled ? 'ON' : 'OFF'}</button></td>
+      <td><button onclick="cmd('pause_strategy', {strategy_id:'${esc(st.strategy_id)}', paused:${!isPaused}})">
+        ${isPaused ? 'Resume' : 'Pause'}</button>${isPaused ? ' <span class="chip warn">P</span>' : ''}</td>
+      <td>${doneChip}${reentry}</td>
+      <td>${inp(st.strategy_id, 'entry.entry_time', p['entry.entry_time'], 50)}</td>
+      <td>${inp(st.strategy_id, 'entry.trigger_pct', p['entry.trigger_pct'], 50)}</td>
+      <td>${inp(st.strategy_id, 'entry.max_contracts', p['entry.max_contracts'], 42)}</td>
+      <td>${inp(st.strategy_id, 'exit.stop_loss_pct', p['exit.stop_loss_pct'], 42)}</td>
+      <td>${inp(st.strategy_id, 'exit.take_profit_pct', p['exit.take_profit_pct'], 42)}</td>
+      <td>${inp(st.strategy_id, 'exit.time_exit_utc', p['exit.time_exit_utc'], 50)}</td>
+      <td>${inp(st.strategy_id, 'position_sizing_pct', p['position_sizing_pct'], 52)}</td>
+      <td>${inp(st.strategy_id, 'leverage', p['leverage'], 38)}</td>
+      <td><button class="primary" onclick="saveStrategy('${esc(st.strategy_id)}')">Apply</button></td>
+    </tr>`;
+  }).join("") || '<tr><td colspan="13" class="empty">no strategies configured</td></tr>');
+}
+
+async function saveStrategy(sid) {
+  const changes = {};
+  document.querySelectorAll(`#strategies input[data-sid="${sid}"]`).forEach(el => {
+    if (el.value !== '' && el.value !== 'null') changes[el.dataset.key] = el.value;
+  });
+  if (!Object.keys(changes).length) return;
+  if (!confirm(`Apply to ${sid}: ${JSON.stringify(changes)}?`)) return;
+  editing = false;
+  await cmd('update_strategy', {strategy_id: sid, changes});
+}
+
+/* ---------------- PnL cards (5s) ---------------- */
+
+let pnlCache = null;
+async function refreshPnl() {
+  try {
+    pnlCache = await (await fetch("/api/pnl")).json();
+  } catch (e) { return; }
+  if (activeTab === 'live') {
+    const t = pnlCache.today || {};
+    // Per-strategy chips: only strategies with activity today (realized or open)
+    const chips = Object.entries(pnlCache.strategies || {})
+      .map(([k, v]) => [k, (v.realized_today || 0) + (v.unrealized_live || 0)])
+      .filter(([, x]) => Math.abs(x) >= 0.005)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+      .map(([k, x]) => `<span class="schip num"><span style="color:var(--muted)">${esc(k)}</span>
+        <b class="${pnlClass(x)}">${usd(x)}</b></span>`);
+    setHtml("pnlstrip",
+      `<span class="lbl">Today</span>
+       <span class="big num ${pnlClass(t.total)}">${usd(t.total)}</span>
+       <span class="sub num">R ${usd(t.realized)} · U ${usd(t.unrealized)} · ${t.closed_positions ?? 0} closed</span>
+       ${chips.join(" ")}
+       <a onclick="showTab('pnl')">all-time →</a>`);
+  }
+  if (activeTab === 'pnl') renderPnlTable();
+}
+
+/* ---------------- PnL tab (on demand + 10s while open) ---------------- */
+
+function renderPnlTable() {
+  if (!pnlCache) return;
+  const t = pnlCache.today || {};
+  setHtml("pnlsummary",
+    `<div class="card total"><div class="k">ALL-TIME PnL</div>
+      <div class="v num ${pnlClass(pnlCache.total_pnl)}">${usd(pnlCache.total_pnl)}</div></div>
+     <div class="card"><div class="k">Today (${esc(t.date || '')})</div>
+      <div class="v num ${pnlClass(t.total)}">${usd(t.total)}</div>
+      <div class="s num">R ${usd(t.realized)} · U ${usd(t.unrealized)}</div></div>
+     <div class="card"><div class="k">Closed today</div>
+      <div class="v num">${t.closed_positions ?? 0}</div></div>`);
+
+  setHtml("pnltable-body", Object.entries(pnlCache.strategies || {})
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `<tr><td>${esc(k)}</td>
+      <td class="r num ${pnlClass(v.realized_today)}">${usd(v.realized_today)}</td>
+      <td class="r num ${pnlClass(v.realized_all_time)}">${usd(v.realized_all_time)}</td>
+      <td class="r num ${pnlClass(v.unrealized_live)}">${usd(v.unrealized_live)}</td>
+      <td class="r num ${pnlClass(v.total)}">${usd(v.total)}</td>
+      <td class="r num">${v.closed_positions}</td></tr>`).join("")
+    || '<tr><td colspan="6" class="empty">none yet</td></tr>');
+
+  setHtml("dailytable-body", (pnlCache.daily || [])
+    .map(d => `<tr><td class="num">${esc(d.date)}</td>
+      <td class="r num ${pnlClass(d.realized_pnl)}">${usd(d.realized_pnl)}</td>
+      <td class="r num">${d.closed_positions}</td></tr>`).join("")
+    || '<tr><td colspan="3" class="empty">none yet</td></tr>');
+}
+
+async function refreshHistory() {
+  renderPnlTable();
+  try {
+    const hist = await (await fetch("/api/history?limit=100")).json();
+    setHtml("historytable-body", hist.map(h => `<tr>
+      <td class="num ts">${esc((h.closed_at || '').slice(5,16).replace('T',' '))}</td>
+      <td>${esc(h.strategy_id)}</td>
+      <td class="num">${esc(h.symbol)} ${h.strike} ${esc(h.right)}</td>
+      <td><span class="side ${h.side}">${esc(h.side)}</span></td>
+      <td class="r num">${h.quantity}</td>
+      <td class="r num">${fmt(h.avg_entry_price)}</td>
+      <td class="r num ${pnlClass(h.realized_pnl)}">${usd(h.realized_pnl)}</td>
+      <td><span class="reason ${esc(h.close_reason || '')}">${esc(h.close_reason || 'unknown')}</span></td>
+    </tr>`).join("") || '<tr><td colspan="8" class="empty">none yet</td></tr>');
+  } catch (e) {}
+}
+
+/* ---------------- activity tab (on demand + 5s while open) ---------------- */
+
+async function refreshActivity() {
+  try {
+    const logs = await (await fetch("/api/logs?lines=80&errors_only=true")).json();
+    setHtml("errlogs", logs.slice().reverse().map(l => {
+      const cls = l.includes("ERROR") || l.includes("CRITICAL") ? "err" : "wrn";
+      return `<div class="${cls}">${esc(l)}</div>`;
+    }).join("") || '<div class="empty">no recent errors or warnings 🎉</div>');
+
+    const evts = await (await fetch("/api/events?limit=50")).json();
+    setHtml("events", evts.map(e =>
+      `<div class="evt"><span class="ts">${esc((e.timestamp || '').slice(11,19))}</span> <b>${esc(e.event_type)}</b> ${esc(e.strategy_id || '')}</div>`
+    ).join(""));
+
+    const cmds = await (await fetch("/api/commands?limit=25")).json();
+    setHtml("cmdtable-body", cmds.map(c => `<tr>
+      <td class="num ts">${esc((c.created_at || '').slice(5,19).replace('T',' '))}</td>
+      <td>${esc(c.type)}</td>
+      <td><span class="chip ${c.status === 'done' ? 'ok' : (c.status === 'failed' ? 'bad' : 'dim')}">${esc(c.status)}</span></td>
+      <td style="color:var(--muted);font-size:11.5px">${esc(c.result || '')}</td>
+    </tr>`).join("") || '<tr><td colspan="4" class="empty">none</td></tr>');
+  } catch (e) {}
+}
+
+/* ---------------- wiring ---------------- */
+
+// Give tbodys addressable ids for setHtml
+document.querySelector("#positions tbody").id = "positions-body";
+document.querySelector("#orders tbody").id = "orders-body";
+document.querySelector("#strategies tbody").id = "strategies-body";
+document.querySelector("#pnltable tbody").id = "pnltable-body";
+document.querySelector("#dailytable tbody").id = "dailytable-body";
+document.querySelector("#historytable tbody").id = "historytable-body";
+document.querySelector("#cmdtable tbody").id = "cmdtable-body";
+
+function connectWS() {
+  const ws = new WebSocket(`ws${location.protocol === 'https:' ? 's' : ''}://${location.host}/ws`);
+  ws.onopen = () => setHtml("conn", "live");
+  ws.onmessage = ev => renderState(JSON.parse(ev.data));
+  ws.onclose = () => {
+    setHtml("conn", "reconnecting…");
+    setHtml("sysstatus", '<span class="chip bad">DISCONNECTED</span>');
+    setTimeout(connectWS, 2000);
+  };
+}
+connectWS();
+refreshPnl();
+setInterval(refreshPnl, 5000);
+setInterval(() => { if (activeTab === 'pnl') refreshHistory(); }, 10000);
+setInterval(() => { if (activeTab === 'activity') refreshActivity(); }, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# broker.yaml — Broker connection and trading mode configuration
+# IBKR connection settings and live trading safety gates.
+
+live_trading:
+  enabled: false   # MUST remain false until ALL safety gates pass. Requires ALLOW_LIVE_TRADING=I_UNDERSTAND_THIS_CAN_LOSE_MONEY env var.
+
+connection:
+  host: "127.0.0.1"
+  port: 7497                   # 7497 = TWS paper, 7496 = TWS live
+  client_id: 9
+  timeout_seconds: 30
+  readonly: false
+
+account:
+  account_id: ""               # Active account ID (leave blank to auto-detect from managed accounts in paper mode)
+  allowlist:                   # Explicit allowlist of account IDs permitted for live trading
+    - "U1234567"               # Replace with your actual live account ID(s) when ready
+
+reconnection:
+  enabled: true
+  max_retries: 5
+  retry_delay_seconds: 10
+  stale_on_disconnect: true    # mark all quotes stale on disconnect
+
+order_defaults:
+  # IBKR Adaptive algo: Urgent | Normal | Patient | null.
+  # DISABLED 2026-06-12: Adaptive + external cancel/replace repricing is
+  # self-defeating — cancels took 11-31s to confirm at the RTH open, so
+  # entries burned their whole timeout waiting on cancels and died 0-fill
+  # (observed live: 4 straight shakeout cycles + a 10-lot straddle).
+  # Plain limits support in-place price modification instead.
+  adaptive_priority: null
+  order_type: "LMT"            # limit orders only for normal flow
+  time_in_force: "DAY"
+  transmit: true
+

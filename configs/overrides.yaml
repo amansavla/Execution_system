@@ -1,0 +1,6 @@
+overrides:
+  disabled_symbols: []
+  paused_strategies: []
+  reduce_only: false
+  reduce_only_strategies: []
+  system_locked: false

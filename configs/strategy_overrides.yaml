@@ -1,0 +1,38 @@
+dummy_long_test:
+  enabled: false
+dummy_short_test:
+  enabled: false
+shakeout_cycle_test:
+  enabled: false
+xsp_0dte_1000:
+  enabled: true
+xsp_0dte_1030:
+  enabled: true
+xsp_0dte_1100:
+  enabled: true
+xsp_0dte_1200:
+  enabled: true
+xsp_0dte_1230:
+  enabled: true
+xsp_late_1300:
+  enabled: true
+xsp_late_1330:
+  enabled: true
+xsp_late_1400:
+  enabled: true
+xsp_late_1430:
+  enabled: true
+xsp_straddle_1000_20:
+  enabled: true
+xsp_straddle_1030_30:
+  enabled: true
+  entry.entry_time: 09:42
+xsp_straddle_1100_40:
+  enabled: true
+xsp_straddle_1230_30:
+  allow_reentry: true
+  enabled: true
+xsp_straddle_1300_30:
+  enabled: true
+xsp_straddle_1330_30:
+  enabled: true

@@ -1,0 +1,369 @@
+# strategies.yaml — Strategy configuration templates
+# Each strategy is identified by a unique strategy_id.
+# An empty list is valid — it means no strategies are configured yet.
+
+strategies:
+  - strategy_id: "xsp_0dte_1000"
+    enabled: true
+    description: "XSP 0DTE breakout at 10:00 AM, 0.2% trigger, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout"
+      max_contracts: 20          # safety cap; actual qty sized dynamically
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:20"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01    # 1% of NetLiq per trade (matches backtest)
+
+  - strategy_id: "xsp_0dte_1030"
+    enabled: false
+    description: "XSP 0DTE breakout at 10:30 AM, 0.2% trigger, 40% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout"
+      max_contracts: 20          # safety cap; actual qty sized dynamically
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 40
+      time_exit_utc: "15:20"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01    # 1% of NetLiq per trade (matches backtest)
+
+  - strategy_id: "xsp_0dte_1100"
+    enabled: false
+    description: "XSP 0DTE breakout at 11:00 AM, 0.3% trigger, 40% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout"
+      max_contracts: 20          # safety cap; actual qty sized dynamically
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 40
+      time_exit_utc: "15:20"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01    # 1% of NetLiq per trade (matches backtest)
+
+  - strategy_id: "xsp_0dte_1200"
+    enabled: false
+    description: "XSP 0DTE breakout at 12:00 PM, 0.2% trigger, 20% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout"
+      max_contracts: 20          # safety cap; actual qty sized dynamically
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 20
+      time_exit_utc: "15:20"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01    # 1% of NetLiq per trade (matches backtest)
+
+  - strategy_id: "xsp_0dte_1230"
+    enabled: false
+    description: "XSP 0DTE breakout at 12:30 PM, 0.3% trigger, 20% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout"
+      max_contracts: 20          # safety cap; actual qty sized dynamically
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 20
+      time_exit_utc: "15:20"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01    # 1% of NetLiq per trade (matches backtest)
+
+  - strategy_id: "xsp_straddle_1000_20"
+    enabled: true   # Phase 7 multi-strategy validation (user-approved, small size)
+    description: "XSP 0DTE Short Straddle at 10:00 AM, 20% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_short_straddle"
+      max_contracts: 2   # Phase 7 validation size cap (was 10); restore after
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 20
+      time_exit_utc: "15:30"
+      use_mid_for_exits: false
+    leverage: 12.0
+    position_sizing_pct: 0.025
+
+  - strategy_id: "xsp_straddle_1030_30"
+    enabled: false
+    description: "XSP 0DTE Short Straddle at 10:30 AM, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_short_straddle"
+      max_contracts: 10
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:30"
+      use_mid_for_exits: false
+    leverage: 12.0
+    position_sizing_pct: 0.025
+
+  - strategy_id: "xsp_straddle_1100_40"
+    enabled: false
+    description: "XSP 0DTE Short Straddle at 11:00 AM, 40% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_short_straddle"
+      max_contracts: 10
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 40
+      time_exit_utc: "15:30"
+      use_mid_for_exits: false
+    leverage: 12.0
+    position_sizing_pct: 0.025
+
+  # --- Afternoon straddles: 12:30, 1:00, 1:30 PM NYC ---
+  - strategy_id: "xsp_straddle_1230_30"
+    enabled: true
+    description: "XSP 0DTE Short Straddle at 12:30 PM, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_short_straddle"
+      max_contracts: 10
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:30"
+      use_mid_for_exits: false
+    leverage: 12.0
+    position_sizing_pct: 0.025
+
+  - strategy_id: "xsp_straddle_1300_30"
+    enabled: true
+    description: "XSP 0DTE Short Straddle at 1:00 PM, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_short_straddle"
+      max_contracts: 10
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:30"
+      use_mid_for_exits: false
+    leverage: 12.0
+    position_sizing_pct: 0.025
+
+  - strategy_id: "xsp_straddle_1330_30"
+    enabled: true
+    description: "XSP 0DTE Short Straddle at 1:30 PM, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_short_straddle"
+      max_contracts: 10
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:30"
+      use_mid_for_exits: false
+    leverage: 12.0
+    position_sizing_pct: 0.025
+
+  # --- Late-afternoon breakout: %chg from 12:00 PM NYC ---
+  - strategy_id: "xsp_late_1300"
+    enabled: true
+    description: "XSP 0DTE late breakout at 1:00 PM, 0.2% trigger from 12PM ref, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout_late"
+      max_contracts: 20
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:45"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01
+
+  - strategy_id: "xsp_late_1330"
+    enabled: true
+    description: "XSP 0DTE late breakout at 1:30 PM, 0.2% trigger from 12PM ref, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout_late"
+      max_contracts: 20
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:45"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01
+
+  - strategy_id: "xsp_late_1400"
+    enabled: true
+    description: "XSP 0DTE late breakout at 2:00 PM, 0.3% trigger from 12PM ref, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout_late"
+      max_contracts: 20
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:45"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01
+
+  - strategy_id: "xsp_late_1430"
+    enabled: true
+    description: "XSP 0DTE late breakout at 2:30 PM, 0.3% trigger from 12PM ref, 40% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "xsp_breakout_late"
+      max_contracts: 20
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 40
+      time_exit_utc: "15:45"
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01
+
+  # TEMP: dummy execution-shakeout strategies (2026-06-11). One contract
+
+  # each, tight time exit. Remove after the live validation session.
+  - strategy_id: "dummy_long_test"
+    enabled: false
+    description: "TEMP shakeout: long ATM call, 1 contract"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    entry:
+      signal_source: "dummy_test"
+      max_contracts: 1
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "11:01"
+      use_mid_for_exits: false
+
+  - strategy_id: "dummy_short_test"
+    enabled: false
+    description: "TEMP shakeout: short OTM put, 1 contract"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    entry:
+      signal_source: "dummy_test"
+      max_contracts: 1
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "11:01"
+      use_mid_for_exits: false
+
+
+  # TEMP: cycling execution shakeout (GTH-capable). Cheap long OTM
+  # call+put, hold ~3 min, exit, cooldown 2 min, repeat. Disable after.
+  - strategy_id: "shakeout_cycle_test"
+    enabled: false
+    description: "TEMP: cycling entry/exit shakeout, 1-lot, defined risk"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    allow_reentry: true   # cycling harness must bypass the one-trade/day gate
+    entry:
+      signal_source: "shakeout_cycle"
+      max_contracts: 1
+      limit_price_offset: 0.05
+      order_timeout_seconds: 60
+    exit:
+      stop_loss_pct: 50
+      max_hold_seconds: 180
+      use_mid_for_exits: false
+    cooldown_seconds: 120
+
+# Example strategy (uncomment and customize):
+#
+#   - strategy_id: "example_put_spread"
+#     enabled: false
+#     description: "Example 0DTE put credit spread on SPX"
+#     underlying: "SPX"
+#     option_type: "spread"        # spread | single
+#     direction: "short"           # long | short
+#     dte_target: 0                # 0 for 0DTE, 1 for 1DTE
+#
+#     entry:
+#       signal_source: "example_strategy"
+#       max_contracts: 5
+#       limit_price_offset: 0.05   # offset from mid in dollars
+#       order_timeout_seconds: 30
+#
+#     exit:
+#       stop_loss_pct: 200         # percent of premium received
+#       take_profit_pct: 50        # percent of premium received
+#       time_exit_utc: "19:45"     # hard time exit (HH:MM UTC)
+#       trailing_stop: false
+#
+#     partial_fills:
+#       entry: "cancel_remainder"  # cancel_remainder | leave_open
+#       exit: "leave_open"         # cancel_remainder | leave_open
+#
+#     cooldown_seconds: 60

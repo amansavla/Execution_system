@@ -1,0 +1,36 @@
+# risk.yaml — Risk engine configuration
+# All limits are enforced by RiskEngine before order submission.
+# All fields under 'global' are required.
+
+global:
+  trading_mode: "paper"              # paper | live | disabled
+  daily_loss_limit: 5000.00          # USD, across all strategies
+  max_open_positions: 10             # total across all strategies
+  max_open_orders: 20                # total across all strategies
+  max_contracts_per_trade: 10
+  max_premium_per_trade: 2000.00     # USD
+  buying_power_reserve_pct: 20       # keep 20% BP as reserve
+  no_new_trades_cutoff_utc: "19:30"
+  # force_flatten_time_utc: "19:50"  # must be after cutoff if set
+  cooldown_after_loss_seconds: 120
+
+per_strategy:
+  max_daily_loss: 2000.00            # USD per strategy
+  max_positions: 3                   # per strategy
+
+per_underlying:
+  max_positions: 5                   # per underlying symbol
+
+spread_limits:
+  max_spread_pct: 15.0               # max bid-ask spread as % of mid
+
+quote_freshness:
+  max_age_seconds: 5                 # ENTRY gate: reject if quote older than this
+  exit_max_age_seconds: 30           # EXIT gate: stop/target checks tolerate quiet
+                                     # tickers (streaming timestamp only moves on
+                                     # NBBO change; skipping stops is riskier)
+
+kill_switch:
+  enabled: true
+  trigger_on_daily_loss: true
+  trigger_on_disconnect_seconds: 30

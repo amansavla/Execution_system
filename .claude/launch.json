@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "uvicorn", "src.dashboard.app:app", "--port", "8501"],
+      "env": { "DASHBOARD_DB": "data/events.db" },
+      "port": 8501
+    }
+  ]
+}

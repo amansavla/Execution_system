@@ -1,0 +1,16 @@
+# dashboard.yaml — Dashboard configuration (Phase 14)
+# Streamlit dashboard settings.
+
+dashboard:
+  host: "127.0.0.1"
+  port: 8501
+  refresh_interval_seconds: 2
+  panels:
+    - positions
+    - orders
+    - risk_status
+    - pnl_summary
+    - event_log
+    - manual_controls
+  auth:
+    enabled: false

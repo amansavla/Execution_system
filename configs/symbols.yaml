@@ -1,0 +1,50 @@
+# symbols.yaml — Symbol configuration
+# Defines tradeable underlyings and their market data requirements.
+# An empty list is valid — it means no symbols are configured yet.
+
+symbols:
+  - symbol: "XSP"
+    exchange: "CBOE"
+    security_type: "IND"
+    option_exchange: "SMART"
+    enabled: true
+    max_age_seconds: 15
+    trading_hours_utc:
+      open: "14:30"
+      close: "21:00"
+    option_multiplier: 100
+
+# Example symbols (uncomment and customize):
+#
+#   - symbol: "SPX"
+#     exchange: "CBOE"
+#     security_type: "IND"           # IND | STK | ETF
+#     option_exchange: "SMART"
+#     enabled: true
+#     max_age_seconds: 5             # quote staleness threshold
+#     trading_hours_utc:
+#       open: "14:30"
+#       close: "21:00"
+#     option_multiplier: 100
+#
+#   - symbol: "XSP"
+#     exchange: "CBOE"
+#     security_type: "IND"
+#     option_exchange: "SMART"
+#     enabled: true
+#     max_age_seconds: 5
+#     trading_hours_utc:
+#       open: "14:30"
+#       close: "21:00"
+#     option_multiplier: 100
+#
+#   - symbol: "QQQ"
+#     exchange: "SMART"
+#     security_type: "STK"
+#     option_exchange: "SMART"
+#     enabled: true
+#     max_age_seconds: 3
+#     trading_hours_utc:
+#       open: "14:30"
+#       close: "21:00"
+#     option_multiplier: 100
