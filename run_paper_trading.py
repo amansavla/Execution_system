@@ -76,6 +76,8 @@ async def main():
     dummy_provider = DummyTestStrategyProvider(broker=broker_client)
     from src.strategies.shakeout_cycle import ShakeoutCycleStrategyProvider
     shakeout_provider = ShakeoutCycleStrategyProvider(broker=broker_client)
+    from src.strategies.xsp_5_ema import XSP5EMAStrategyProvider
+    five_ema_provider = XSP5EMAStrategyProvider(broker=broker_client)
 
     strategy_provider = CompositeStrategyProvider({
         "xsp_breakout": breakout_provider,
@@ -83,6 +85,7 @@ async def main():
         "xsp_short_straddle": straddle_provider,
         "dummy_test": dummy_provider,
         "shakeout_cycle": shakeout_provider,
+        "xsp_5_ema": five_ema_provider,
     })
     
     runner = ExecutionRunner(

@@ -33,3 +33,10 @@ class CompositeStrategyProvider(StrategyProvider):
             )
             return []
         return await provider.poll(strategy_config, current_time)
+
+    async def collect_exits(self, strategy_config: StrategyConfig, current_time: datetime):
+        """Route strategy-driven exit collection to the matching provider."""
+        provider = self.providers.get(strategy_config.entry.signal_source)
+        if not provider or not hasattr(provider, "collect_exits"):
+            return set()
+        return await provider.collect_exits(strategy_config, current_time)

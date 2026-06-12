@@ -82,6 +82,16 @@ class StrategyProvider:
         """Return signals from a strategy for this tick. Empty list = no signal."""
         return []
 
+    async def collect_exits(self, strategy_config: StrategyConfig, current_time: datetime) -> set[UUID]:
+        """Position IDs this strategy wants closed NOW (strategy-driven exits).
+
+        Called every exit-check tick for strategies with open positions —
+        unlike poll(), which the runner skips while a strategy has open
+        positions/orders (wait-until-flat). Returned ids ride ExitManager's
+        `strategy_exit` path. Default: no strategy-driven exits.
+        """
+        return set()
+
 
 # ---------------------------------------------------------------------------
 # ExecutionRunner
@@ -1348,12 +1358,30 @@ class ExecutionRunner:
             if bar is not None:
                 bars[sym] = bar
 
+        # Strategy-driven exits: providers monitor their own open positions
+        # (e.g. 5EMA underlying stops / premium trailing) and flag position
+        # ids for the ExitManager strategy_exit path. Per-strategy failures
+        # are isolated — a broken provider must not block stop/time exits.
+        provider_exits: set[UUID] = set()
+        eligible_strategy_ids = {p.strategy_id for p in eligible_positions}
+        for strategy_id, strategy_cfg in self._strategy_configs.items():
+            if not strategy_cfg.enabled or strategy_id not in eligible_strategy_ids:
+                continue
+            try:
+                flagged = await self._strategy_provider.collect_exits(strategy_cfg, now)
+                if flagged:
+                    provider_exits |= flagged
+            except Exception as e:
+                logger.error(
+                    "collect_exits failed for %s: %s", strategy_id, e, exc_info=True
+                )
+
         # Check exits only for eligible positions (no pending exit order)
         exit_signals = self.exit_manager.check_exits(
             positions=eligible_positions,
             quotes=quotes,
             current_time=now,
-            strategy_exits=self._asymmetric_exits | self._manual_exits,
+            strategy_exits=self._asymmetric_exits | self._manual_exits | provider_exits,
             force_flatten_all=self._flatten_all_active,
             bars=bars,
             # Exits tolerate 2x the entry spread limit: 0DTE spreads widen

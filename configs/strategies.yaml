@@ -281,6 +281,51 @@ strategies:
       use_mid_for_exits: false
     position_sizing_pct: 0.01
 
+  # --- 5 EMA intraday breakout: long ATM CALL/PUT off 5-min alert bars ---
+  # Exits are strategy-driven (provider collect_exits hook): underlying
+  # stop at the signal bar high/low; base = 3R underlying target,
+  # trail = option-premium trailing floor (lock 15% per 20% gain on the
+  # peak). time_exit_utc here is the ExitManager backstop for the
+  # provider's own 15:45 NY time exit. Max 5 trades/day per variant
+  # (counted in the provider), one open position at a time.
+  - strategy_id: "xsp_5ema_base"
+    enabled: false
+    description: "5 EMA breakout: underlying SL at signal bar, 3R target"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    allow_reentry: true   # up to 5 trades/day, gated in the provider
+    entry:
+      signal_source: "xsp_5_ema"
+      max_contracts: 20          # safety cap; actual qty sized dynamically
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      time_exit_utc: "15:45"     # interpreted America/New_York (DST-aware)
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01    # 1% of NetLiq per trade
+    cooldown_seconds: 60
+
+  - strategy_id: "xsp_5ema_trail"
+    enabled: true
+    description: "5 EMA breakout: underlying SL, premium trailing floor"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "long"
+    dte_target: 0
+    allow_reentry: true   # up to 5 trades/day, gated in the provider
+    entry:
+      signal_source: "xsp_5_ema"
+      max_contracts: 20          # safety cap; actual qty sized dynamically
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+    exit:
+      time_exit_utc: "15:45"     # interpreted America/New_York (DST-aware)
+      use_mid_for_exits: false
+    position_sizing_pct: 0.01    # 1% of NetLiq per trade
+    cooldown_seconds: 60
+
   # TEMP: dummy execution-shakeout strategies (2026-06-11). One contract
 
   # each, tight time exit. Remove after the live validation session.
