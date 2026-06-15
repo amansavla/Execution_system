@@ -41,6 +41,23 @@ def test_dashboard_app_has_zero_broker_imports() -> None:
             )
 
 
+def test_dashboard_package_has_no_streamlit_imports() -> None:
+    """The legacy Streamlit dashboard has been removed; the dashboard
+    package must stay on the FastAPI/SQLite command-queue path."""
+    for path in DASHBOARD_DIR.rglob("*.py"):
+        src = path.read_text()
+        tree = ast.parse(src)
+        imported: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.extend(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.append(node.module)
+        assert "streamlit" not in imported, (
+            f"dashboard package imports legacy Streamlit module in {path}"
+        )
+
+
 def test_dashboard_runtime_does_not_load_broker_modules(monkeypatch) -> None:
     """Importing the app must not pull broker modules into sys.modules."""
     for m in list(sys.modules):

@@ -80,10 +80,10 @@ Verify that state discrepancies between the internal book and the broker are cau
 
 ## 5. Dashboard Controls Test
 
-Verify that dangerous actions on the Streamlit dashboard require explicit confirmation to avoid accidental activation.
+Verify that dangerous actions on the FastAPI dashboard require explicit confirmation to avoid accidental activation.
 
 - [ ] **Flatten Button Gate**:
-  - Open the positions tab on the Streamlit dashboard.
+  - Open the positions tab on the FastAPI dashboard.
   - Click the **Flatten** button for a position.
   - Verify that it does not immediately dispatch an order, but instead presents a clear confirmation step (e.g. dynamic confirmation button).
   - Verify that the action is only dispatched after the confirmation is clicked, and the confirmation state resets correctly afterward.
