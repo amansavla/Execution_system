@@ -220,9 +220,63 @@ async def test_xsp_short_straddle_duplicate_prevention() -> None:
     signals1 = await provider.poll(config, poll_time)
     assert len(signals1) == 2
 
-    # Second poll on the same day does NOT trigger
+    # One-trade-per-day is enforced by an ACTUAL position existing today,
+    # NOT by the signal having been emitted (emit-then-reject must NOT burn
+    # the day's slot — regression 2026-06-15). Simulate the fill by
+    # registering an open position for this strategy today.
+    from src.portfolio.position_manager import PositionManager
+    from src.storage.event_log import EventStore
+    from src.core.models import Position
+    from src.core.enums import PositionStatus
+    from uuid import uuid4
+
+    pm = PositionManager(EventStore())
+    pm.positions[uuid4()] = Position(
+        position_id=uuid4(),
+        strategy_id="xsp_straddle_1000_20",
+        contract=OptionContract(symbol="XSP", expiry="20260521", strike=500.0,
+                                right=OptionRight.CALL, multiplier=100),
+        side=OrderSide.SELL,
+        quantity=2,
+        average_entry_price=2.5,
+        status=PositionStatus.OPEN,
+        entry_order_id=uuid4(),
+        entry_time=poll_time,
+    )
+    provider.set_position_manager(pm)
+
+    # Second poll on the same day does NOT trigger — a position exists.
     signals2 = await provider.poll(config, poll_time)
     assert signals2 == []
+
+
+@pytest.mark.asyncio
+async def test_xsp_short_straddle_rejected_signal_does_not_burn_slot() -> None:
+    """A signal that never becomes a position must NOT block later polls.
+
+    Regression: the provider used to mark _traded_today on emit, so a
+    risk-rejected signal (no position created) locked the strategy out for
+    the rest of the day. With no position registered, a second poll must
+    still emit.
+    """
+    broker = StubBroker()
+    provider = XSPShortStraddleStrategyProvider(broker)
+    config = StrategyConfig(
+        strategy_id="xsp_straddle_1000_20",
+        enabled=True,
+        underlying="XSP",
+        entry=StrategyEntryConfig(signal_source="xsp_short_straddle", max_contracts=5),
+        leverage=12.0,
+        position_sizing_pct=0.025,
+    )
+    tz_ny = ZoneInfo("America/New_York")
+    poll_time = datetime.combine(date(2026, 5, 21), time(10, 1), tzinfo=tz_ny).astimezone(UTC)
+
+    signals1 = await provider.poll(config, poll_time)
+    assert len(signals1) == 2
+    # No position was created (signal was "rejected") -> still emits.
+    signals2 = await provider.poll(config, poll_time)
+    assert len(signals2) == 2
 
 
 @pytest.mark.asyncio

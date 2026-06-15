@@ -255,8 +255,16 @@ class XSPShortStraddleStrategyProvider(StrategyProvider):
             metadata={**metadata, "leg": "put", "option_mid": best_put_price}
         )
 
-        # Mark as traded to prevent duplicate signals
-        self._traded_today.add((current_date, strategy_config.strategy_id))
+        # NOTE: we deliberately do NOT mark _traded_today here. Marking on
+        # *emit* burned the strategy's one daily slot even when the signal
+        # was then risk-rejected (e.g. max_positions_per_underlying full on
+        # a restart): the strategy never traded, yet refused to retry for
+        # the rest of the day (observed 2026-06-15). The real one-trade-per-
+        # day guard is the PositionManager check above (lines ~78-84), which
+        # only counts ACTUAL positions; an in-flight order is covered by the
+        # runner's wait-until-flat, and repeated rejections are throttled by
+        # the runner's _entry_retry_after backoff. So a rejected signal no
+        # longer consumes the day's slot.
 
         logger.info(
             "Emitted XSP Short Straddle signals for %s: Call strike=%s (mid=%s, qty=%d), Put strike=%s (mid=%s, qty=%d)",
