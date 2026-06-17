@@ -87,6 +87,13 @@ class IBKRBrokerClient(BrokerClient):
         from src.marketdata.bars import BarBuilder
         self.bar_builder = BarBuilder(persist_dir="data/bars")
 
+        # Option-chain quote snapshots (data/chains/) — lets shadow-replay
+        # reproduce premium-driven decisions (straddle strike selection,
+        # 5EMA trail exit) that underlying bars alone can't. Throttled per
+        # symbol to keep volume bounded.
+        from src.marketdata.chain_log import ChainSnapshotWriter
+        self.chain_writer = ChainSnapshotWriter(persist_dir="data/chains")
+
         # Connection management flags
         self._intentional_disconnect = False
 
@@ -697,6 +704,9 @@ class IBKRBrokerClient(BrokerClient):
                 timestamp=ts,
             )
             result[sym] = snapshot
+
+        # Snapshot option quotes for shadow-replay (throttled, best-effort).
+        self.chain_writer.record(result, now_mono)
 
         return result
 
