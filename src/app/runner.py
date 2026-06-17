@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 from uuid import UUID, uuid4
@@ -65,6 +65,15 @@ from src.storage.position_store import PositionStore
 from src.storage.runtime_state import RuntimeStateStore
 
 logger = logging.getLogger(__name__)
+
+# Time-triggered strategies (breakouts, straddles) may only OPEN within this
+# many minutes of their scheduled entry_time. Beyond it, no new entry that day
+# — this stops late entries when the runner restarts mid-session and bounds
+# allow_reentry so a strategy can't accumulate size all afternoon (2026-06-17:
+# late_1330 grew to 38 contracts via all-day re-entries). Signal-driven
+# strategies (5EMA) have no parseable entry_time and are exempt — they
+# self-limit via their own cutoff + max_trades_per_day.
+ENTRY_WINDOW_MINUTES = 5
 
 
 # ---------------------------------------------------------------------------
@@ -655,24 +664,63 @@ class ExecutionRunner:
                 "allow_reentry: %s", ny_date, sorted(self._persisted_traded_today),
             )
 
-    def _entry_window_closed(self, strategy_cfg: StrategyConfig, now: datetime) -> bool:
-        """True when 'now' is at/after the strategy's scheduled exit time.
+    def _strategy_entry_time_ny(self, strategy_cfg: StrategyConfig) -> Optional[tuple[int, int]]:
+        """Scheduled NY entry time (hh, mm) for a time-triggered strategy.
 
-        A strategy whose time exit has passed must never OPEN a position:
-        on 2026-06-11 straddles re-entered at 15:46 (after their 15:30
-        exit) following a restart, and kept polling all evening. The exit
-        time is interpreted in America/New_York, matching _apply_exit_rules.
+        Prefers an explicit config entry_time; else parses the HHMM token in
+        the strategy_id (xsp_straddle_1330_30, xsp_0dte_1030, xsp_late_1330).
+        Returns None for signal-driven strategies (e.g. xsp_5ema_*) — they
+        have no scheduled entry and are exempt from the entry-window bound.
         """
-        time_exit = getattr(strategy_cfg.exit, "time_exit_utc", None)
-        if not time_exit:
-            return False
-        try:
-            hh, mm = map(int, str(time_exit).split(":"))
-        except (ValueError, TypeError):
-            return False
+        cfg_et = getattr(strategy_cfg.entry, "entry_time", None)
+        if cfg_et:
+            try:
+                hh, mm = map(int, str(cfg_et).split(":"))
+                return (hh, mm)
+            except (ValueError, TypeError):
+                pass
+        import re
+        m = re.search(r"_(\d{2})(\d{2})(?:_|$)", strategy_cfg.strategy_id)
+        if m:
+            hh, mm = int(m.group(1)), int(m.group(2))
+            if 0 <= hh < 24 and 0 <= mm < 60:
+                return (hh, mm)
+        return None
+
+    def _entry_window_closed(self, strategy_cfg: StrategyConfig, now: datetime) -> bool:
+        """True when a strategy must NOT open a position now.
+
+        Two bounds, both in America/New_York:
+          (a) at/after the scheduled exit time — a strategy whose time exit
+              passed must never open (2026-06-11: straddles re-entered at
+              15:46 after a restart and polled all evening);
+          (b) more than ENTRY_WINDOW_MINUTES past the scheduled entry_time —
+              stops late entries on a mid-session restart and bounds
+              allow_reentry so size can't accumulate all afternoon
+              (2026-06-17: late_1330 reached 38 contracts).
+        Signal-driven strategies (no parseable entry_time) skip bound (b).
+        """
         from zoneinfo import ZoneInfo
         ny = now.astimezone(ZoneInfo("America/New_York"))
-        return (ny.hour, ny.minute) >= (hh, mm)
+
+        # (a) exit-time bound
+        time_exit = getattr(strategy_cfg.exit, "time_exit_utc", None)
+        if time_exit:
+            try:
+                hh, mm = map(int, str(time_exit).split(":"))
+                if (ny.hour, ny.minute) >= (hh, mm):
+                    return True
+            except (ValueError, TypeError):
+                pass
+
+        # (b) entry-window upper bound (time-triggered strategies only)
+        et = self._strategy_entry_time_ny(strategy_cfg)
+        if et is not None:
+            window = getattr(strategy_cfg.entry, "entry_window_minutes", None) or ENTRY_WINDOW_MINUTES
+            entry_dt = ny.replace(hour=et[0], minute=et[1], second=0, microsecond=0)
+            if ny > entry_dt + timedelta(minutes=window):
+                return True
+        return False
 
     @property
     def _default_algo(self) -> Optional[str]:
