@@ -69,6 +69,11 @@ STRATEGY_PARAMS = {
     },
 }
 
+# Trade PUTs only: arm/enter on bars fully ABOVE the EMA (short-bias
+# breakdown setups), never the CALL side. Flip to False to re-enable
+# both directions. (Requested 2026-06-17.)
+PUTS_ONLY = True
+
 # No NEW entries at/after this NY time (positions still run to 15:45).
 ENTRY_CUTOFF_NY = time(15, 30)
 # Hard strategy-side time exit (config time_exit_utc should match).
@@ -101,11 +106,17 @@ class XSP5EMAStrategyProvider(StrategyProvider):
         # {'direction': 'CALL'|'PUT', 'high': float, 'low': float,
         #  'bar_time': datetime (5-min close time NY)}
         self._signal_bar: Optional[dict] = None
+        # Entry is confirmed on the NEXT 5-min CLOSE that breaks the armed
+        # signal bar's level (not on a 1-min intrabar break). When such a
+        # 5-min bar closes, this holds the entry intent until poll() consumes
+        # it; it is cleared on the next 5-min bar that doesn't trigger.
+        # {'direction', 'stop_underlying', 'entry_underlying', 'bar_time'}
+        self._entry_trigger: Optional[dict] = None
         self._backfill_failed_day: Optional[date] = None
 
         # --- per-strategy_id state
         self._trades_today: dict[str, int] = {}
-        # signal-bar close time already used for an entry by this strategy
+        # entry-trigger close time already acted on by this strategy
         self._consumed_bar_time: dict[str, datetime] = {}
 
         # --- per-position exit context
@@ -127,6 +138,7 @@ class XSP5EMAStrategyProvider(StrategyProvider):
         self._day = d
         self._ema = None
         self._signal_bar = None
+        self._entry_trigger = None
         self._next_5min_close = datetime.combine(d, time(9, 35), tzinfo=_NY)
         self._trades_today = {}
         self._consumed_bar_time = {}
@@ -205,32 +217,68 @@ class XSP5EMAStrategyProvider(StrategyProvider):
             else:
                 self._ema = close_px * (1.0 / 3.0) + self._ema * (2.0 / 3.0)
 
-            # Signal-bar rules need full OHLC -> live bars only.
-            if bar is not None and self._ema is not None:
-                if bar["low"] > self._ema:
-                    self._signal_bar = {
-                        "direction": "PUT", "high": bar["high"], "low": bar["low"],
-                        "bar_time": close_t,
-                    }
-                    logger.info(
-                        "5EMA: PUT alert bar @ %s [%.2f-%.2f] ema=%.2f",
-                        close_t.strftime("%H:%M"), bar["low"], bar["high"], self._ema,
-                    )
-                elif bar["high"] < self._ema:
-                    self._signal_bar = {
-                        "direction": "CALL", "high": bar["high"], "low": bar["low"],
-                        "bar_time": close_t,
-                    }
-                    logger.info(
-                        "5EMA: CALL alert bar @ %s [%.2f-%.2f] ema=%.2f",
-                        close_t.strftime("%H:%M"), bar["low"], bar["high"], self._ema,
-                    )
-                elif self._signal_bar is not None:
-                    logger.info(
-                        "5EMA: signal bar cancelled — bar @ %s touched ema=%.2f",
-                        close_t.strftime("%H:%M"), self._ema,
-                    )
-                    self._signal_bar = None
+            if self._ema is not None:
+                # 1. ENTRY CONFIRMATION on the 5-min CLOSE: if an armed signal
+                #    bar from an EARLIER 5-min bar exists and THIS bar's close
+                #    breaks its level, fire the entry trigger. close_px is
+                #    available for live and historical bars, so the break is
+                #    evaluated even on a backfilled close.
+                sig = self._signal_bar
+                triggered = False
+                if sig is not None and close_t > sig["bar_time"]:
+                    if sig["direction"] == "PUT" and close_px <= sig["low"]:
+                        self._entry_trigger = {
+                            "direction": "PUT", "stop_underlying": sig["high"],
+                            "entry_underlying": close_px, "bar_time": close_t,
+                        }
+                        logger.info(
+                            "5EMA: PUT entry trigger @ %s — 5-min close %.2f <= signal low %.2f (stop %.2f)",
+                            close_t.strftime("%H:%M"), close_px, sig["low"], sig["high"],
+                        )
+                        self._signal_bar = None
+                        triggered = True
+                    elif sig["direction"] == "CALL" and close_px >= sig["high"] and not PUTS_ONLY:
+                        self._entry_trigger = {
+                            "direction": "CALL", "stop_underlying": sig["low"],
+                            "entry_underlying": close_px, "bar_time": close_t,
+                        }
+                        logger.info(
+                            "5EMA: CALL entry trigger @ %s — 5-min close %.2f >= signal high %.2f (stop %.2f)",
+                            close_t.strftime("%H:%M"), close_px, sig["high"], sig["low"],
+                        )
+                        self._signal_bar = None
+                        triggered = True
+
+                # 2. No entry off this bar: stale trigger from a prior bar is
+                #    over, and this bar may (re)arm or cancel the signal.
+                #    Arming needs full OHLC -> live bars only.
+                if not triggered:
+                    self._entry_trigger = None
+                    if bar is not None:
+                        if bar["low"] > self._ema:
+                            self._signal_bar = {
+                                "direction": "PUT", "high": bar["high"], "low": bar["low"],
+                                "bar_time": close_t,
+                            }
+                            logger.info(
+                                "5EMA: PUT alert bar @ %s [%.2f-%.2f] ema=%.2f",
+                                close_t.strftime("%H:%M"), bar["low"], bar["high"], self._ema,
+                            )
+                        elif bar["high"] < self._ema and not PUTS_ONLY:
+                            self._signal_bar = {
+                                "direction": "CALL", "high": bar["high"], "low": bar["low"],
+                                "bar_time": close_t,
+                            }
+                            logger.info(
+                                "5EMA: CALL alert bar @ %s [%.2f-%.2f] ema=%.2f",
+                                close_t.strftime("%H:%M"), bar["low"], bar["high"], self._ema,
+                            )
+                        elif self._signal_bar is not None:
+                            logger.info(
+                                "5EMA: signal bar cancelled — bar @ %s touched ema=%.2f",
+                                close_t.strftime("%H:%M"), self._ema,
+                            )
+                            self._signal_bar = None
 
             self._next_5min_close = close_t + timedelta(minutes=5)
 
@@ -359,25 +407,17 @@ class XSP5EMAStrategyProvider(StrategyProvider):
         ):
             return []
 
-        sig = self._signal_bar
-        if sig is None:
+        # Entry fires only when a 5-min bar has CLOSED through the signal
+        # level (set by _update_market_state). poll() just consumes it.
+        trig = self._entry_trigger
+        if trig is None:
             return []
-        if self._consumed_bar_time.get(strategy_config.strategy_id) == sig["bar_time"]:
-            return []  # already traded off this signal bar
+        if self._consumed_bar_time.get(strategy_config.strategy_id) == trig["bar_time"]:
+            return []  # already entered on this trigger
 
-        underlying_close = self._latest_underlying_close()
-        if underlying_close is None:
-            return []
-
-        # Breakout on 1-min close beyond the signal bar's level
-        if sig["direction"] == "PUT" and underlying_close <= sig["low"]:
-            right = OptionRight.PUT
-            stop_underlying = sig["high"]
-        elif sig["direction"] == "CALL" and underlying_close >= sig["high"]:
-            right = OptionRight.CALL
-            stop_underlying = sig["low"]
-        else:
-            return []
+        right = OptionRight.PUT if trig["direction"] == "PUT" else OptionRight.CALL
+        stop_underlying = trig["stop_underlying"]
+        underlying_close = trig["entry_underlying"]
 
         contract = OptionContract(
             symbol="XSP",
@@ -407,7 +447,7 @@ class XSP5EMAStrategyProvider(StrategyProvider):
             )
             qty = 1
 
-        self._consumed_bar_time[strategy_config.strategy_id] = sig["bar_time"]
+        self._consumed_bar_time[strategy_config.strategy_id] = trig["bar_time"]
         self._trades_today[strategy_config.strategy_id] = (
             self._trades_today.get(strategy_config.strategy_id, 0) + 1
         )
@@ -421,11 +461,11 @@ class XSP5EMAStrategyProvider(StrategyProvider):
         }
 
         logger.warning(
-            "5EMA ENTRY %s: %s %s strike=%s (signal bar %s [%.2f-%.2f], "
+            "5EMA ENTRY %s: %s %s strike=%s (5-min close confirm @ %s, "
             "underlying=%.2f, stop=%.2f, trade %d/%d)",
-            strategy_config.strategy_id, sig["direction"], contract.expiry,
-            contract.strike, sig["bar_time"].strftime("%H:%M"),
-            sig["low"], sig["high"], underlying_close, stop_underlying,
+            strategy_config.strategy_id, trig["direction"], contract.expiry,
+            contract.strike, trig["bar_time"].strftime("%H:%M"),
+            underlying_close, stop_underlying,
             self._trades_today[strategy_config.strategy_id],
             params["max_trades_per_day"],
         )
@@ -438,13 +478,11 @@ class XSP5EMAStrategyProvider(StrategyProvider):
             limit_price=round(option_mid, 2) if option_mid else None,
             timestamp=current_time,
             metadata={
-                "trigger_type": f"5ema_breakout_{sig['direction'].lower()}",
-                "signal_bar_high": sig["high"],
-                "signal_bar_low": sig["low"],
-                "signal_bar_time": sig["bar_time"].isoformat(),
+                "trigger_type": f"5ema_5min_close_{trig['direction'].lower()}",
+                "stop_underlying": stop_underlying,
+                "entry_5min_close_time": trig["bar_time"].isoformat(),
                 "ema": self._ema,
                 "underlying_at_entry": underlying_close,
-                "stop_underlying": stop_underlying,
                 "trail_enabled": params["trail_enabled"],
             },
         )]
