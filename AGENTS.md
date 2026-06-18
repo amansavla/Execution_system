@@ -220,7 +220,7 @@ show-risk, show-positions, show-orders, show-rejections
 | 11    | IBKR setup docs and diagnostic scripts       | complete  |
 | 12    | IBKRBrokerClient, paper mode                 | complete  |
 | 13    | Execution analytics                          | complete  |
-| 14    | Streamlit dashboard                          | complete  |
+| 14    | FastAPI dashboard                            | complete  |
 | 15    | Paper trading runner                         | complete  |
 | 16    | Live mode safety gates                       | complete  |
 
@@ -324,7 +324,8 @@ execution-system/
       execution_quality.py
       reports.py
     dashboard/                 ← Phase 14
-      streamlit_app.py
+      app.py
+      static/index.html
 
   tests/
     unit/

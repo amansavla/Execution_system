@@ -1,5 +1,5 @@
 # dashboard.yaml — Dashboard configuration (Phase 14)
-# Streamlit dashboard settings.
+# FastAPI dashboard settings.
 
 dashboard:
   host: "127.0.0.1"

@@ -213,9 +213,9 @@ Each entry includes a date and the phase in which it was recorded.
 
 ## Phase 14
 
-- **P14-A1 (2026-05-20):** Streamlit dashboard loads database events using `asyncio.run` to allow background query processing during layout render cycles without blocking page render ticks.
-- **P14-A2 (2026-05-20):** The state reconstruction plays back SQLite transaction histories to instantiate memory representations of `PositionManager` and `OrderManager`, enabling the dashboard to function seamlessly even when the live runner process is offline.
-- **P14-A3 (2026-05-20):** Safety confirmations are enforced for all critical actions (lock, cancel-all, flatten) using Streamlit's interactive checkbox widget prior to dispatching commands to `ManualControlService`.
+- **P14-A1 (2026-06-14):** The operator dashboard is the FastAPI app in `src/dashboard/app.py`. It is a SQLite-only consumer that reads runner-published state and enqueues control commands; it must not import broker, execution, portfolio, or risk components.
+- **P14-A2 (2026-06-14):** Dashboard actions are durable command-queue writes. The runner drains those commands and routes exits, cancels, locks, and strategy updates through the same execution paths used by automated behavior.
+- **P14-A3 (2026-06-14):** Browser-side confirmations are enforced by `src/dashboard/static/index.html` before critical command submissions such as flatten, lock, restart, and shutdown.
 
 ## Phase 15
 

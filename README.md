@@ -65,7 +65,7 @@ signals or trading rules.
 | 11 | IBKR setup docs and diagnostic scripts | ✅ complete |
 | 12 | IBKRBrokerClient, paper mode | ✅ complete |
 | 13 | Execution analytics | ✅ complete |
-| 14 | Streamlit dashboard | ✅ complete |
+| 14 | FastAPI dashboard | ✅ complete |
 | 15 | Paper trading runner | ✅ complete |
 | 16 | Live mode safety gates | ✅ complete |
 
