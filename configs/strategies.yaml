@@ -208,6 +208,32 @@ strategies:
     leverage: 12.0
     position_sizing_pct: 0.025
 
+  # --- Operator-triggered straddle (dashboard "Fire Straddle" button) ---
+  # Never fires on its own: entry_time 23:59 is unreachable during RTH, so
+  # poll() always returns []. Entries come ONLY from the fire_straddle
+  # command (provider.emit_now). allow_reentry lets the button be used more
+  # than once per day; wait-until-flat still spaces the fires out.
+  - strategy_id: "xsp_straddle_manual"
+    enabled: true
+    description: "XSP 0DTE Short Straddle, manual fire from dashboard, 30% SL"
+    underlying: "XSP"
+    option_type: "single"
+    direction: "short"
+    dte_target: 0
+    allow_reentry: true
+    entry:
+      signal_source: "xsp_short_straddle"
+      max_contracts: 10
+      limit_price_offset: 0.05
+      order_timeout_seconds: 90
+      entry_time: "23:59"
+    exit:
+      stop_loss_pct: 30
+      time_exit_utc: "15:30"
+      use_mid_for_exits: false
+    leverage: 12.0
+    position_sizing_pct: 0.025
+
   # --- Late-afternoon breakout: %chg from 12:00 PM NYC ---
   - strategy_id: "xsp_late_1300"
     enabled: true

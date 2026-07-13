@@ -237,8 +237,15 @@ class XSPBreakoutStrategyProvider(StrategyProvider):
             "position_sizing_pct": position_sizing_pct,
         }
 
-        # Record signal emitted to avoid duplicates
-        self._traded_today.add((current_date, strategy_config.strategy_id))
+        # NOTE: we deliberately do NOT mark _traded_today here. Marking on
+        # *emit* burned the strategy's one daily slot even when the signal
+        # was then risk-rejected (e.g. spread_too_wide at signal time): the
+        # strategy never traded, yet refused to retry for the rest of the
+        # day (observed 2026-07-02, xsp_0dte_1200). Same root cause as the
+        # straddle fix (67a720b) — ported here since this poll() is shared
+        # by XSPBreakoutLateStrategyProvider too. The real one-trade-per-day
+        # guard is the PositionManager check above, which only counts
+        # ACTUAL positions.
 
         signal = StrategySignal(
             strategy_id=strategy_config.strategy_id,

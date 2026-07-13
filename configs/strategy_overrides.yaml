@@ -14,25 +14,34 @@ xsp_0dte_1200:
   enabled: true
 xsp_0dte_1230:
   enabled: true
+xsp_5ema_base:
+  enabled: true
 xsp_late_1300:
+  allow_reentry: true
   enabled: true
 xsp_late_1330:
   enabled: true
 xsp_late_1400:
-  enabled: true
-xsp_late_1430:
-  enabled: true
-xsp_straddle_1000_20:
-  enabled: true
-xsp_straddle_1030_30:
-  enabled: true
-  entry.entry_time: 09:42
-xsp_straddle_1100_40:
-  enabled: true
-xsp_straddle_1230_30:
   allow_reentry: true
   enabled: true
+xsp_late_1430:
+  allow_reentry: true
+  enabled: true
+xsp_straddle_1000_20:
+  allow_reentry: false
+  enabled: true
+xsp_straddle_1030_30:
+  allow_reentry: false
+  enabled: true
+xsp_straddle_1100_40:
+  allow_reentry: false
+  enabled: true
+xsp_straddle_1230_30:
+  allow_reentry: false
+  enabled: true
 xsp_straddle_1300_30:
+  allow_reentry: true
   enabled: true
 xsp_straddle_1330_30:
+  allow_reentry: false
   enabled: true

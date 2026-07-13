@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import time
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -283,6 +283,13 @@ class StrategyEntryConfig(BaseModel):
     # from the dashboard). entry_time is NY local "HH:MM".
     entry_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     trigger_pct: Optional[float] = Field(default=None, gt=0)
+    # Strike-selection mode for strategies that scan a chain (e.g. the short
+    # straddle): "premium_target" picks the strike whose mid is closest to a
+    # computed target premium; "delta_target" picks the strike whose |delta|
+    # is closest to target_delta instead. target_delta is a magnitude
+    # (0.30 matches call delta +0.30 and put delta -0.30).
+    strike_selection: Literal["premium_target", "delta_target"] = Field(default="premium_target")
+    target_delta: Optional[float] = Field(default=None, gt=0, lt=1)
 
 
 class StrategyExitConfig(BaseModel):

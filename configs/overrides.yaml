@@ -1,6 +1,7 @@
 overrides:
+  paused_strategies:
+  - xsp_0dte_1000
   disabled_symbols: []
-  paused_strategies: []
   reduce_only: false
-  reduce_only_strategies: []
   system_locked: false
+  reduce_only_strategies: []

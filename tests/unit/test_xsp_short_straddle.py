@@ -13,11 +13,18 @@ from src.broker.interface import BrokerClient
 
 
 class StubBroker(BrokerClient):
-    def __init__(self, underlying_price: float = 500.0) -> None:
+    def __init__(self, underlying_price: float = 500.0, with_delta: bool = False,
+                 no_delta_strikes: Optional[set] = None) -> None:
         self.connected = True
         self.underlying_price = underlying_price
         self.quote_queries = []
         self.account_state_calls = 0
+        # Synthetic linear delta model (only used when with_delta=True):
+        # call_delta = 0.5 - 0.1*(strike - U), put_delta = -(0.5 + 0.1*(strike - U))
+        # Independent of the premium/time-value model below, so delta-target
+        # tests exercise a genuinely different selection path.
+        self.with_delta = with_delta
+        self.no_delta_strikes = no_delta_strikes or set()
 
     async def connect(self) -> None:
         pass
@@ -70,10 +77,19 @@ class StubBroker(BrokerClient):
                             # Put OTM: time value only
                             mid = time_value
 
+                    delta = None
+                    if self.with_delta and strike not in self.no_delta_strikes:
+                        offset = strike - self.underlying_price
+                        if right_char.upper() == "C":
+                            delta = max(0.01, min(0.99, 0.5 - 0.1 * offset))
+                        else:
+                            delta = max(-0.99, min(-0.01, -(0.5 + 0.1 * offset)))
+
                     result[sym] = QuoteSnapshot(
                         symbol=sym,
                         bid=mid - 0.02,
                         ask=mid + 0.02,
+                        delta=delta,
                         timestamp=now
                     )
         return result
@@ -341,4 +357,123 @@ async def test_xsp_short_straddle_allow_reentry() -> None:
 
     # Second poll with allow_reentry=True STILL triggers signals!
     signals2 = await provider.poll(config, poll_time)
+    assert len(signals2) == 2
+
+
+@pytest.mark.asyncio
+async def test_xsp_short_straddle_delta_target_selection() -> None:
+    # U = 500.0. Synthetic model: call_delta = 0.5 - 0.1*offset,
+    # put_delta = -(0.5 + 0.1*offset), offset = strike - U.
+    # target_delta = 0.16:
+    #   calls: offset=3 -> delta=0.2 (diff 0.04); offset=4 -> delta=0.1 (diff 0.06)
+    #     -> strike 503 wins.
+    #   puts:  offset=-3 -> delta=-0.2 (diff 0.04); offset=-4 -> delta=-0.1 (diff 0.06)
+    #     -> strike 497 wins.
+    # These differ from the premium-target strikes (502/498) for the same
+    # underlying, confirming delta_target is a genuinely independent path.
+    broker = StubBroker(underlying_price=500.0, with_delta=True)
+    provider = XSPShortStraddleStrategyProvider(broker)
+
+    config = StrategyConfig(
+        strategy_id="xsp_straddle_1000_20",
+        enabled=True,
+        underlying="XSP",
+        entry=StrategyEntryConfig(
+            signal_source="xsp_short_straddle", max_contracts=10,
+            strike_selection="delta_target", target_delta=0.16,
+        ),
+        leverage=12.0,
+        position_sizing_pct=0.025,
+    )
+
+    tz_ny = ZoneInfo("America/New_York")
+    poll_time = datetime.combine(date(2026, 5, 21), time(10, 1), tzinfo=tz_ny).astimezone(UTC)
+
+    signals = await provider.poll(config, poll_time)
+    assert len(signals) == 2
+
+    call_sig = next(s for s in signals if s.metadata["leg"] == "call")
+    put_sig = next(s for s in signals if s.metadata["leg"] == "put")
+
+    assert call_sig.contract.right == OptionRight.CALL
+    assert call_sig.contract.strike == 503.0
+    assert call_sig.metadata["option_delta"] == pytest.approx(0.2)
+    assert call_sig.metadata["strike_selection"] == "delta_target"
+    assert call_sig.metadata["target_delta"] == 0.16
+
+    assert put_sig.contract.right == OptionRight.PUT
+    assert put_sig.contract.strike == 497.0
+    assert put_sig.metadata["option_delta"] == pytest.approx(-0.2)
+
+
+@pytest.mark.asyncio
+async def test_xsp_short_straddle_delta_target_skips_missing_delta() -> None:
+    # Strike 503/497 (the natural winners for target_delta=0.16) have no
+    # delta available (e.g. IBKR modelGreeks not yet populated) — the
+    # selector must skip them and fall through to the next-closest strike
+    # that does have delta, not crash or silently pick a premium-based one.
+    broker = StubBroker(
+        underlying_price=500.0, with_delta=True,
+        no_delta_strikes={503.0, 497.0},
+    )
+    provider = XSPShortStraddleStrategyProvider(broker)
+
+    config = StrategyConfig(
+        strategy_id="xsp_straddle_1000_20",
+        enabled=True,
+        underlying="XSP",
+        entry=StrategyEntryConfig(
+            signal_source="xsp_short_straddle", max_contracts=10,
+            strike_selection="delta_target", target_delta=0.16,
+        ),
+        leverage=12.0,
+        position_sizing_pct=0.025,
+    )
+
+    tz_ny = ZoneInfo("America/New_York")
+    poll_time = datetime.combine(date(2026, 5, 21), time(10, 1), tzinfo=tz_ny).astimezone(UTC)
+
+    signals = await provider.poll(config, poll_time)
+    assert len(signals) == 2
+
+    call_sig = next(s for s in signals if s.metadata["leg"] == "call")
+    put_sig = next(s for s in signals if s.metadata["leg"] == "put")
+
+    # Next-best with delta available: offset=4 -> delta=0.1 (diff 0.06)
+    assert call_sig.contract.strike == 504.0
+    assert put_sig.contract.strike == 496.0
+
+
+@pytest.mark.asyncio
+async def test_emit_now_bypasses_entry_time_and_daily_gates() -> None:
+    # Dashboard "Fire Straddle" button: emit_now must build signals even
+    # (a) before/without a reachable entry_time and (b) when the strategy
+    # already traded today — the click itself is the authorization. poll()
+    # on the same config must stay silent (schedule gates intact).
+    broker = StubBroker(underlying_price=500.0)
+    provider = XSPShortStraddleStrategyProvider(broker)
+
+    config = StrategyConfig(
+        strategy_id="xsp_straddle_manual",
+        enabled=True,
+        underlying="XSP",
+        entry=StrategyEntryConfig(signal_source="xsp_short_straddle", max_contracts=10,
+                                   entry_time="23:59"),
+        leverage=12.0,
+        position_sizing_pct=0.025,
+    )
+
+    tz_ny = ZoneInfo("America/New_York")
+    poll_time = datetime.combine(date(2026, 5, 21), time(10, 1), tzinfo=tz_ny).astimezone(UTC)
+
+    # poll: entry_time 23:59 unreachable -> no auto-fire
+    assert await provider.poll(config, poll_time) == []
+
+    # emit_now: fires regardless
+    signals = await provider.emit_now(config, poll_time)
+    assert len(signals) == 2
+    assert {s.metadata["leg"] for s in signals} == {"call", "put"}
+
+    # emit_now again same day (button clicked twice) still fires
+    signals2 = await provider.emit_now(config, poll_time)
     assert len(signals2) == 2

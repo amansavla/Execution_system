@@ -8,6 +8,7 @@ from src.app.runner import StrategyProvider
 from src.core.config import StrategyConfig
 from src.core.enums import SignalDirection, OptionRight, PositionStatus
 from src.core.models import StrategySignal, OptionContract
+from src.marketdata.data_quality import validate_quote_prices
 from src.portfolio.position_manager import PositionManager
 from src.broker.interface import BrokerClient
 
@@ -25,10 +26,22 @@ def parse_entry_time(strategy_id: str) -> Optional[tuple[int, int]]:
 class XSPShortStraddleStrategyProvider(StrategyProvider):
     """ATM Short Straddle strategy on XSP 0DTE options with per-leg independent stop-loss."""
 
-    def __init__(self, broker: BrokerClient, position_manager: Optional[PositionManager] = None) -> None:
+    def __init__(
+        self,
+        broker: BrokerClient,
+        position_manager: Optional[PositionManager] = None,
+        max_spread_pct: float = 15.0,
+    ) -> None:
         self.broker = broker
         self._position_manager = position_manager
-        
+        # Strikes whose quote fails this at selection time are skipped —
+        # picking "closest to target premium" alone can land on a strike
+        # with a flickering, thinly-quoted market (real print frozen for
+        # 30s+ while bid/ask bounce), which then chases forever and never
+        # fills (see 2026-06-17 stuck-exit incident). Matches risk.yaml's
+        # spread_limits.max_spread_pct by default.
+        self._max_spread_pct = max_spread_pct
+
         # Track generated signals/trades in memory for today
         self._traded_today: set[tuple[date, str]] = set()
         # strategy_id -> unix time of last "no quotes" warning (rate limit)
@@ -83,6 +96,28 @@ class XSPShortStraddleStrategyProvider(StrategyProvider):
                         if pos_time_ny.date() == current_date:
                             return []
 
+        return await self._build_signals(strategy_config, current_time)
+
+    async def emit_now(self, strategy_config: StrategyConfig, current_time: datetime) -> list[StrategySignal]:
+        """Operator-triggered one-shot: build straddle signals immediately.
+
+        Skips the scheduled entry-time and once-per-day gates (steps 2-4 of
+        poll) — the dashboard "fire straddle" button is the caller and each
+        click means exactly one straddle NOW. Runner-level guards still
+        apply (system lock, entry-window exit-time bound, wait-until-flat)
+        as do all risk checks (daily loss limit, 15:30 ET cutoff, spread).
+        """
+        logger.warning(
+            "Manual straddle fire requested for %s", strategy_config.strategy_id
+        )
+        return await self._build_signals(strategy_config, current_time)
+
+    async def _build_signals(self, strategy_config: StrategyConfig, current_time: datetime) -> list[StrategySignal]:
+        """Scan the chain, select strikes, size and emit both legs (steps 5-12)."""
+        tz_ny = ZoneInfo("America/New_York")
+        time_ny = current_time.astimezone(tz_ny)
+        current_date = time_ny.date()
+
         # 5. Fetch current underlying price
         try:
             quotes = await self.broker.get_quotes(["XSP"])
@@ -109,11 +144,18 @@ class XSPShortStraddleStrategyProvider(StrategyProvider):
         # 6. Calculate target premium
         leverage = strategy_config.leverage or 12.0
         position_sizing_pct = strategy_config.position_sizing_pct or 0.025
-        
+
         # margin = (undl * multiplier * 2) / leverage
         # target_premium = (margin * position_sizing_pct) / multiplier
         # Simplifying: target_premium = (undl * 2 * position_sizing_pct) / leverage
         target_premium = (current_underlying_price * 2.0 * position_sizing_pct) / leverage
+
+        # 6b. Alternative strike-selection mode: match |delta| instead of
+        # premium. Sizing (step 11) still runs off the selected strike's
+        # premium regardless of mode, so this only changes *which* strike
+        # gets picked.
+        strike_selection = getattr(strategy_config.entry, "strike_selection", "premium_target")
+        target_delta = getattr(strategy_config.entry, "target_delta", None) or 0.30
 
         # 7. Construct candidate strikes (±12 strikes around ATM)
         atm_strike = round(current_underlying_price)
@@ -154,37 +196,59 @@ class XSPShortStraddleStrategyProvider(StrategyProvider):
             logger.error("Error fetching option quotes for straddle strikes: %s", e)
             return []
 
-        # 9. Find best Call strike (closest to target premium)
+        # 9. Find best Call strike (closest to target premium, or closest
+        # to target_delta when strike_selection == "delta_target")
         best_call: Optional[OptionContract] = None
         best_call_price: Optional[float] = None
+        best_call_delta: Optional[float] = None
         best_call_diff = float("inf")
 
         for sym, contract in call_symbols.items():
             q = option_quotes.get(sym)
             if not q or q.bid is None or q.ask is None:
                 continue
+            valid, _reason = validate_quote_prices(q, self._max_spread_pct)
+            if not valid:
+                continue
             mid = (q.bid + q.ask) / 2.0
-            diff = abs(mid - target_premium)
+            if strike_selection == "delta_target":
+                if q.delta is None:
+                    continue
+                diff = abs(q.delta - target_delta)
+            else:
+                diff = abs(mid - target_premium)
             if diff < best_call_diff:
                 best_call_diff = diff
                 best_call = contract
                 best_call_price = mid
+                best_call_delta = q.delta
 
-        # 10. Find best Put strike (closest to target premium)
+        # 10. Find best Put strike (closest to target premium, or closest
+        # to -target_delta when strike_selection == "delta_target")
         best_put: Optional[OptionContract] = None
         best_put_price: Optional[float] = None
+        best_put_delta: Optional[float] = None
         best_put_diff = float("inf")
 
         for sym, contract in put_symbols.items():
             q = option_quotes.get(sym)
             if not q or q.bid is None or q.ask is None:
                 continue
+            valid, _reason = validate_quote_prices(q, self._max_spread_pct)
+            if not valid:
+                continue
             mid = (q.bid + q.ask) / 2.0
-            diff = abs(mid - target_premium)
+            if strike_selection == "delta_target":
+                if q.delta is None:
+                    continue
+                diff = abs(q.delta + target_delta)  # put delta is negative
+            else:
+                diff = abs(mid - target_premium)
             if diff < best_put_diff:
                 best_put_diff = diff
                 best_put = contract
                 best_put_price = mid
+                best_put_delta = q.delta
 
         if not best_call or not best_put:
             # Rate-limited: this fires every tick when the option chain has
@@ -233,6 +297,8 @@ class XSPShortStraddleStrategyProvider(StrategyProvider):
             "position_sizing_pct": position_sizing_pct,
             "available_capital": available_cap,
             "margin_per_leg": margin,
+            "strike_selection": strike_selection,
+            "target_delta": target_delta if strike_selection == "delta_target" else None,
         }
 
         call_signal = StrategySignal(
@@ -242,7 +308,7 @@ class XSPShortStraddleStrategyProvider(StrategyProvider):
             requested_quantity=qty_call,
             limit_price=round(best_call_price, 2),
             timestamp=current_time,
-            metadata={**metadata, "leg": "call", "option_mid": best_call_price}
+            metadata={**metadata, "leg": "call", "option_mid": best_call_price, "option_delta": best_call_delta}
         )
 
         put_signal = StrategySignal(
@@ -252,7 +318,7 @@ class XSPShortStraddleStrategyProvider(StrategyProvider):
             requested_quantity=qty_put,
             limit_price=round(best_put_price, 2),
             timestamp=current_time,
-            metadata={**metadata, "leg": "put", "option_mid": best_put_price}
+            metadata={**metadata, "leg": "put", "option_mid": best_put_price, "option_delta": best_put_delta}
         )
 
         # NOTE: we deliberately do NOT mark _traded_today here. Marking on

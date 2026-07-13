@@ -11,6 +11,7 @@ Command types and payloads (payload is JSON):
     cancel_order    {"order_id": "<uuid>"}
     pause_strategy  {"strategy_id": "...", "paused": true|false}
     flatten_all     {}
+    fire_straddle   {"strategy_id": "..."}  # default xsp_straddle_manual
 
 Lifecycle: pending -> done | failed (result column carries detail).
 Commands are durable: an unprocessed command survives a runner restart.
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 VALID_COMMAND_TYPES = {
     "exit_position", "cancel_order", "pause_strategy", "flatten_all",
     "update_strategy", "unlock_system", "lock_system", "restart_runner",
-    "shutdown_runner",
+    "shutdown_runner", "fire_straddle",
 }
 
 _SCHEMA = """

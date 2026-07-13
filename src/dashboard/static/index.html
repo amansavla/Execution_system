@@ -122,6 +122,7 @@
   <div class="spacer"></div>
   <span id="conn"></span>
   <div class="ctl">
+    <button class="primary" onclick="cmd('fire_straddle', {strategy_id:'xsp_straddle_manual'}, 'Fire a short straddle NOW? (premium-target strikes, 30% per-leg SL, closes at 15:30 ET)')">Fire Straddle</button>
     <button class="danger" onclick="cmd('flatten_all', {}, 'FLATTEN ALL positions?')">Flatten All</button>
     <button onclick="cmd('lock_system', {}, 'LOCK the system? (blocks new entries; exits keep running)')">Lock</button>
     <button class="primary" onclick="cmd('unlock_system', {}, 'Unlock? Reconciles first; only unlocks if clean.')">Unlock</button>

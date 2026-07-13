@@ -86,6 +86,17 @@ class IBKRBrokerClient(BrokerClient):
         # Bars persist to data/bars/ for the shadow-replay acceptance test.
         from src.marketdata.bars import BarBuilder
         self.bar_builder = BarBuilder(persist_dir="data/bars")
+        # Last price actually fed to bar_builder per symbol. pendingTickersEvent
+        # fires on ANY field changing (bid/ask update alone re-fires it), but
+        # ticker.last only changes on a genuine new trade print. Without this
+        # guard, a stale/frozen last (common on illiquid deep-ITM 0DTE
+        # strikes) gets re-submitted to the bar on every bid/ask tick,
+        # polluting bar.high/low with a price that was never actually
+        # tradeable during that bar and causing false stop-loss triggers
+        # (measured 2026-07-02: XSP 742 CALL bar.high stuck at a stale
+        # last=4.06 for 2+ minutes while live bid/ask stayed well below the
+        # stop level).
+        self._last_bar_tick_price: dict[str, float] = {}
 
         # Option-chain quote snapshots (data/chains/) — lets shadow-replay
         # reproduce premium-driven decisions (straddle strike selection,
@@ -948,7 +959,8 @@ class IBKRBrokerClient(BrokerClient):
                 if bar_price is None and getattr(contract, "secType", "") == "IND":
                     if bid is not None and ask is not None:
                         bar_price = (bid + ask) / 2.0
-                if bar_price is not None:
+                if bar_price is not None and bar_price != self._last_bar_tick_price.get(internal_sym):
+                    self._last_bar_tick_price[internal_sym] = bar_price
                     ts = getattr(ticker, "time", None)
                     self.bar_builder.on_tick(internal_sym, bar_price, ts)
 

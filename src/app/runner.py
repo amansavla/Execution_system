@@ -101,6 +101,14 @@ class StrategyProvider:
         """
         return set()
 
+    async def emit_now(self, strategy_config: StrategyConfig, current_time: datetime) -> list[StrategySignal]:
+        """Operator-triggered immediate emission (dashboard fire button).
+
+        Providers that support manual firing override this to build signals
+        bypassing their schedule gates. Default: nothing to emit.
+        """
+        return []
+
 
 # ---------------------------------------------------------------------------
 # ExecutionRunner
@@ -198,6 +206,11 @@ class ExecutionRunner:
         # strategy_id -> earliest next entry attempt after a rejected batch
         # (prevents the emit->reject->emit spam loop at 1 signal/sec).
         self._entry_retry_after: dict[str, datetime] = {}
+        # Operator "fire straddle NOW" requests (dashboard button). Consumed
+        # on the next tick by calling the provider's emit_now instead of
+        # poll — one request = one attempt; a request blocked by a guard
+        # (lock, window, wait-until-flat) is dropped, not deferred.
+        self._manual_fire_requests: set[str] = set()
 
     # ------------------------------------------------------------------
     # Configuration
@@ -493,6 +506,26 @@ class ExecutionRunner:
                     self._flatten_all_active = True
                     self.command_queue.mark(cid, "done", "flatten_all latched")
 
+                elif ctype == "fire_straddle":
+                    sid = str(payload.get("strategy_id") or "xsp_straddle_manual")
+                    cfg = self._strategy_configs.get(sid)
+                    if cfg is None:
+                        self.command_queue.mark(cid, "failed", f"unknown strategy {sid}")
+                    elif cfg.entry.signal_source != "xsp_short_straddle":
+                        self.command_queue.mark(
+                            cid, "failed", f"{sid} is not a straddle strategy")
+                    elif not cfg.enabled or sid in self.override_manager.state.paused_strategies:
+                        self.command_queue.mark(cid, "failed", f"{sid} disabled/paused")
+                    elif self._entry_window_closed(cfg, now):
+                        self.command_queue.mark(
+                            cid, "failed",
+                            "entry window closed (past exit time / 15:30 ET cutoff)")
+                    else:
+                        self._manual_fire_requests.add(sid)
+                        logger.warning("Manual straddle fire queued for %s", sid)
+                        self.command_queue.mark(
+                            cid, "done", f"{sid} will fire on next tick (<30s)")
+
                 elif ctype == "update_strategy":
                     result = self._apply_strategy_update(
                         str(payload.get("strategy_id", "")),
@@ -560,6 +593,8 @@ class ExecutionRunner:
         "entry.max_contracts": int,
         "entry.entry_time": str,
         "entry.trigger_pct": float,
+        "entry.strike_selection": str,
+        "entry.target_delta": float,
         "position_sizing_pct": float,
         "leverage": float,
         "allow_reentry": bool,
@@ -664,14 +699,27 @@ class ExecutionRunner:
                 "allow_reentry: %s", ny_date, sorted(self._persisted_traded_today),
             )
 
+    # Only these signal sources fire at a FIXED INSTANT (scan the chain and
+    # enter right at entry_time) — the entry-window bound exists to stop
+    # THEM from re-firing late after a restart. Breakout-style sources
+    # (xsp_breakout, xsp_breakout_late) use entry_time as a scan-START only:
+    # they watch continuously for a % move trigger from that time onward,
+    # with no natural "closes 5 minutes later" — bounding them blocks
+    # legitimate late-afternoon triggers (2026-07-02: xsp_0dte_1230 window
+    # would have closed at 12:35 while the strategy is meant to watch all
+    # the way to its time_exit).
+    _TIME_TRIGGERED_SIGNAL_SOURCES = frozenset({"xsp_short_straddle"})
+
     def _strategy_entry_time_ny(self, strategy_cfg: StrategyConfig) -> Optional[tuple[int, int]]:
         """Scheduled NY entry time (hh, mm) for a time-triggered strategy.
 
         Prefers an explicit config entry_time; else parses the HHMM token in
-        the strategy_id (xsp_straddle_1330_30, xsp_0dte_1030, xsp_late_1330).
-        Returns None for signal-driven strategies (e.g. xsp_5ema_*) — they
-        have no scheduled entry and are exempt from the entry-window bound.
+        the strategy_id (xsp_straddle_1330_30). Returns None for anything
+        whose signal_source isn't in _TIME_TRIGGERED_SIGNAL_SOURCES — those
+        are exempt from the entry-window bound (see class comment above).
         """
+        if getattr(strategy_cfg.entry, "signal_source", None) not in self._TIME_TRIGGERED_SIGNAL_SOURCES:
+            return None
         cfg_et = getattr(strategy_cfg.entry, "entry_time", None)
         if cfg_et:
             try:
@@ -1026,13 +1074,24 @@ class ExecutionRunner:
             if strategy_id in self.override_manager.state.paused_strategies:
                 continue
 
+            # Operator fire-now request (dashboard button): consumed here —
+            # one click is one attempt; bypasses the schedule gates below
+            # (traded-today, retry backoff) but NOT the entry window or
+            # wait-until-flat.
+            manual_fire = strategy_id in self._manual_fire_requests
+            if manual_fire:
+                self._manual_fire_requests.discard(strategy_id)
+
             # Entry window: never open after the strategy's exit time.
             if self._entry_window_closed(strategy_cfg, now):
+                if manual_fire:
+                    logger.warning("Manual fire for %s dropped: entry window closed", strategy_id)
                 continue
 
             # One trade per day, restart-proof (position_store backed).
             if (
-                not getattr(strategy_cfg, "allow_reentry", False)
+                not manual_fire
+                and not getattr(strategy_cfg, "allow_reentry", False)
                 and strategy_id in self._persisted_traded_today
             ):
                 continue
@@ -1040,7 +1099,7 @@ class ExecutionRunner:
             # Back-off after a risk-rejected batch (stops the 1/sec
             # emit->reject->emit loop seen on 2026-06-11).
             retry_after = self._entry_retry_after.get(strategy_id)
-            if retry_after is not None and now < retry_after:
+            if not manual_fire and retry_after is not None and now < retry_after:
                 continue
 
             # Core Rule (AGENTS.md): "always wait until flat"
@@ -1058,13 +1117,20 @@ class ExecutionRunner:
                 for o in self.order_manager.orders.values()
             )
             if has_open_positions or has_active_orders:
+                if manual_fire:
+                    logger.warning(
+                        "Manual fire for %s dropped: strategy not flat "
+                        "(open positions or working orders)", strategy_id)
                 continue
 
             # Isolate per-strategy failures: one broken provider must not
             # abort the whole tick (it previously skipped exit checks and
             # the dashboard snapshot for every strategy that tick).
             try:
-                signals = await self._strategy_provider.poll(strategy_cfg, now)
+                if manual_fire:
+                    signals = await self._strategy_provider.emit_now(strategy_cfg, now)
+                else:
+                    signals = await self._strategy_provider.poll(strategy_cfg, now)
             except Exception as e:
                 logger.error("Strategy %s poll failed: %s", strategy_id, e, exc_info=True)
                 self.event_store.log_callback("error", {
@@ -1181,12 +1247,18 @@ class ExecutionRunner:
                     # Submit order with repricer enabled. First reprice after
                     # 2s (halfway to touch), then at the touch — mirrors the
                     # backtest's fill-at-bar-open assumption as closely as a
-                    # limit order can.
+                    # limit order can. After attempt 4 (~8s in), cross the
+                    # touch by a nickel like exits do — without this, a
+                    # strike with a flickering/thin quote can chase the
+                    # touch for the full attempt budget and cancel unfilled
+                    # (measured p99=42s time-to-fill, some never filling).
                     reprice_cfg = RepriceConfig(
                         enabled=True,
                         max_attempts=6,
                         reprice_interval_seconds=2.0,
                         timeout_seconds=float(strategy_cfg.entry.order_timeout_seconds),
+                        cross_touch_after_attempts=4,
+                        cross_touch_offset=0.05,
                         # One modify message instead of cancel/replace —
                         # requires plain limits (adaptive_priority: null);
                         # Adaptive orders reject in-place revision.
@@ -1686,93 +1758,131 @@ class ExecutionRunner:
                 (bpos.contract.symbol, bpos.contract.expiry, float(bpos.contract.strike), right_str)
             )
 
-            # 1. AUTHORITATIVE attribution: persisted position_attribution
-            #    row from the previous process (exact contract identity).
-            matched_strategy_id = None
-            attribution_source = None
-            entry_time = now
-            attr = self.position_store.find_open_attribution(
+            attrs = self.position_store.find_all_open_attributions(
                 bpos.contract.symbol, bpos.contract.expiry,
                 bpos.contract.strike, right_str,
             )
-            if attr and attr["strategy_id"] in self._strategy_configs:
-                matched_strategy_id = attr["strategy_id"]
-                attribution_source = "position_store"
-                if attr.get("entry_time"):
-                    try:
-                        entry_time = datetime.fromisoformat(attr["entry_time"])
-                    except (ValueError, TypeError):
-                        pass
-                # Adopt the persisted position_id so each restart UPDATES the
-                # same attribution row instead of inserting a new one (7
-                # duplicate OPEN rows accumulated for one contract on
-                # 2026-06-11, inflating dashboard history/PnL counts).
-                try:
-                    bpos.position_id = UUID(str(attr["position_id"]))
-                except (ValueError, TypeError):
-                    pass
 
-            # 2. Fallback heuristic (logged loudly): first enabled strategy
-            #    whose underlying matches this position's symbol.
-            if matched_strategy_id is None:
-                for strategy_id, cfg in self._strategy_configs.items():
-                    if not getattr(cfg, "enabled", False):
-                        continue
-                    if getattr(cfg, "underlying", None) == bpos.contract.symbol:
-                        matched_strategy_id = strategy_id
-                        attribution_source = "underlying_heuristic"
-                        logger.warning(
-                            "No persisted attribution for %s %s %s %s — falling back to "
-                            "underlying-match heuristic (strategy=%s). Exit rules may be wrong.",
-                            bpos.contract.symbol, bpos.contract.expiry,
-                            bpos.contract.strike, right_str, strategy_id,
-                        )
-                        break
-
-            bpos.strategy_id = matched_strategy_id or "unknown"
-            bpos.status = PositionStatus.OPEN
-            bpos.entry_time = entry_time
-            bpos.created_at = entry_time
-            bpos.updated_at = now
-
-            self.position_manager.positions[bpos.position_id] = bpos
-
-            logger.warning(
-                "Seeded position from broker on startup: %s %s %s qty=%d avg_price=%.4f -> strategy=%s (source=%s)",
-                bpos.contract.symbol, bpos.contract.expiry, bpos.contract.strike,
-                bpos.quantity, bpos.average_entry_price, bpos.strategy_id,
-                attribution_source,
-            )
-            self.event_store.log_callback("position_seeded_from_broker", {
-                "position_id": bpos.position_id,
-                "strategy_id": bpos.strategy_id,
-                "attribution_source": attribution_source,
-                "contract": f"{bpos.contract.symbol} {bpos.contract.expiry} {bpos.contract.strike} {bpos.contract.right}",
-                "side": bpos.side.value,
-                "quantity": bpos.quantity,
-                "average_entry_price": bpos.average_entry_price,
-                "timestamp": now.isoformat(),
-            })
-
-            if matched_strategy_id:
-                # Anchor exit rules to the TRUE entry time when restored from
-                # the store (so time exits fire at the right moment), else now.
-                self._apply_exit_rules(bpos, entry_time)
+            if len(attrs) > 1:
+                # Two+ strategies independently hold the SAME contract (e.g.
+                # two straddles picking identical strikes the same day) —
+                # the broker only reports one NET quantity, so seeding a
+                # single Position with the full broker qty would silently
+                # overwrite one strategy's tracked exposure onto another's.
+                # Split into one seeded Position per attribution row, each
+                # keeping its own last-known quantity/price/position_id.
+                total_attr_qty = sum(a["quantity"] for a in attrs)
+                if total_attr_qty != bpos.quantity:
+                    logger.error(
+                        "Broker qty %d for %s %s %s %s doesn't match sum of tracked "
+                        "attribution rows (%d across strategies %s) — manual "
+                        "reconciliation required.",
+                        bpos.quantity, bpos.contract.symbol, bpos.contract.expiry,
+                        bpos.contract.strike, right_str, total_attr_qty,
+                        [a["strategy_id"] for a in attrs],
+                    )
+                for attr in attrs:
+                    sub_bpos = bpos.model_copy(update={
+                        "quantity": attr["quantity"],
+                        "average_entry_price": attr["avg_entry_price"],
+                    })
+                    self._seed_one_position(sub_bpos, attr, now)
             else:
-                logger.error(
-                    "Could not attribute seeded position %s %s %s to any enabled strategy; "
-                    "no exit rules applied. Manual review required.",
-                    bpos.contract.symbol, bpos.contract.expiry, bpos.contract.strike,
-                )
-
-            # Persist (or refresh) the seeded position's attribution row
-            try:
-                self.position_store.upsert_position(bpos)
-            except Exception as e:
-                logger.error("Attribution persist failed for seeded %s: %s", bpos.position_id, e)
+                attr = attrs[0] if attrs else None
+                self._seed_one_position(bpos, attr, now)
 
         # Rows for positions the broker no longer holds must not shadow
         # future contract-identity lookups.
         stale = self.position_store.mark_closed_if_absent(seeded_contract_keys)
         if stale:
             logger.info("Attribution store: marked %d stale OPEN rows closed", stale)
+
+    def _seed_one_position(self, bpos: Position, attr: Optional[dict], now: datetime) -> None:
+        """Attribute and register a single seeded broker position.
+
+        `bpos.quantity`/`average_entry_price` must already reflect this
+        specific strategy's share (the caller splits a shared-contract
+        broker position across multiple attribution rows before calling
+        this once per row).
+        """
+        right_str = bpos.contract.right.value if hasattr(bpos.contract.right, "value") else str(bpos.contract.right)
+
+        # 1. AUTHORITATIVE attribution: persisted position_attribution row.
+        matched_strategy_id = None
+        attribution_source = None
+        entry_time = now
+        if attr and attr["strategy_id"] in self._strategy_configs:
+            matched_strategy_id = attr["strategy_id"]
+            attribution_source = "position_store"
+            if attr.get("entry_time"):
+                try:
+                    entry_time = datetime.fromisoformat(attr["entry_time"])
+                except (ValueError, TypeError):
+                    pass
+            # Adopt the persisted position_id so each restart UPDATES the
+            # same attribution row instead of inserting a new one (7
+            # duplicate OPEN rows accumulated for one contract on
+            # 2026-06-11, inflating dashboard history/PnL counts).
+            try:
+                bpos.position_id = UUID(str(attr["position_id"]))
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Fallback heuristic (logged loudly): first enabled strategy
+        #    whose underlying matches this position's symbol.
+        if matched_strategy_id is None:
+            for strategy_id, cfg in self._strategy_configs.items():
+                if not getattr(cfg, "enabled", False):
+                    continue
+                if getattr(cfg, "underlying", None) == bpos.contract.symbol:
+                    matched_strategy_id = strategy_id
+                    attribution_source = "underlying_heuristic"
+                    logger.warning(
+                        "No persisted attribution for %s %s %s %s — falling back to "
+                        "underlying-match heuristic (strategy=%s). Exit rules may be wrong.",
+                        bpos.contract.symbol, bpos.contract.expiry,
+                        bpos.contract.strike, right_str, strategy_id,
+                    )
+                    break
+
+        bpos.strategy_id = matched_strategy_id or "unknown"
+        bpos.status = PositionStatus.OPEN
+        bpos.entry_time = entry_time
+        bpos.created_at = entry_time
+        bpos.updated_at = now
+
+        self.position_manager.positions[bpos.position_id] = bpos
+
+        logger.warning(
+            "Seeded position from broker on startup: %s %s %s qty=%d avg_price=%.4f -> strategy=%s (source=%s)",
+            bpos.contract.symbol, bpos.contract.expiry, bpos.contract.strike,
+            bpos.quantity, bpos.average_entry_price, bpos.strategy_id,
+            attribution_source,
+        )
+        self.event_store.log_callback("position_seeded_from_broker", {
+            "position_id": bpos.position_id,
+            "strategy_id": bpos.strategy_id,
+            "attribution_source": attribution_source,
+            "contract": f"{bpos.contract.symbol} {bpos.contract.expiry} {bpos.contract.strike} {bpos.contract.right}",
+            "side": bpos.side.value,
+            "quantity": bpos.quantity,
+            "average_entry_price": bpos.average_entry_price,
+            "timestamp": now.isoformat(),
+        })
+
+        if matched_strategy_id:
+            # Anchor exit rules to the TRUE entry time when restored from
+            # the store (so time exits fire at the right moment), else now.
+            self._apply_exit_rules(bpos, entry_time)
+        else:
+            logger.error(
+                "Could not attribute seeded position %s %s %s to any enabled strategy; "
+                "no exit rules applied. Manual review required.",
+                bpos.contract.symbol, bpos.contract.expiry, bpos.contract.strike,
+            )
+
+        # Persist (or refresh) the seeded position's attribution row
+        try:
+            self.position_store.upsert_position(bpos)
+        except Exception as e:
+            logger.error("Attribution persist failed for seeded %s: %s", bpos.position_id, e)

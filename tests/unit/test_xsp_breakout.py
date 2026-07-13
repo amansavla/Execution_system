@@ -259,10 +259,69 @@ async def test_xsp_breakout_poll_duplicate_prevention() -> None:
     # First poll triggers signal
     signals1 = await provider.poll(config, poll_time)
     assert len(signals1) == 1
-    
-    # Second poll on the same day does NOT trigger
+
+    # One-trade-per-day is enforced by an ACTUAL position existing today,
+    # NOT by the signal having been emitted (emit-then-reject must NOT burn
+    # the day's slot — regression 2026-07-02, mirrors the straddle fix in
+    # 67a720b). Simulate the fill by registering an open position.
+    from src.portfolio.position_manager import PositionManager
+    from src.storage.event_log import EventStore
+    from uuid import uuid4
+
+    pm = PositionManager(EventStore())
+    pm.positions[uuid4()] = Position(
+        position_id=uuid4(),
+        strategy_id="xsp_0dte_1000",
+        contract=OptionContract(symbol="XSP", expiry="20260521", strike=502.0,
+                                right=OptionRight.CALL, multiplier=100),
+        side=OrderSide.BUY,
+        quantity=1,
+        average_entry_price=2.5,
+        status=PositionStatus.OPEN,
+        entry_order_id=uuid4(),
+        entry_time=poll_time,
+    )
+    provider.set_position_manager(pm)
+
+    # Second poll on the same day does NOT trigger — a position exists.
     signals2 = await provider.poll(config, poll_time)
     assert signals2 == []
+
+
+@pytest.mark.asyncio
+async def test_xsp_breakout_rejected_signal_does_not_burn_slot() -> None:
+    """A signal that never becomes a position must NOT block later polls.
+
+    Regression 2026-07-02: xsp_0dte_1200 emitted its 12:00 PM signal, which
+    was risk-rejected (spread_too_wide), and then refused to retry for the
+    rest of the day because _traded_today was marked on emit. With no
+    position registered, a second poll must still emit.
+    """
+    broker = StubBroker()
+    broker.historical_close = 500.0
+    broker.mock_quote = QuoteSnapshot(
+        symbol="XSP",
+        bid=501.5,
+        ask=501.5,
+        timestamp=datetime.now(UTC)
+    )
+
+    provider = XSPBreakoutStrategyProvider(broker)
+    config = StrategyConfig(
+        strategy_id="xsp_0dte_1000",
+        enabled=True,
+        underlying="XSP",
+        entry=StrategyEntryConfig(signal_source="test", max_contracts=1),
+    )
+
+    tz_ny = ZoneInfo("America/New_York")
+    poll_time = datetime.combine(date(2026, 5, 21), time(10, 1), tzinfo=tz_ny).astimezone(UTC)
+
+    signals1 = await provider.poll(config, poll_time)
+    assert len(signals1) == 1
+    # No position was created (signal was "rejected") -> still emits.
+    signals2 = await provider.poll(config, poll_time)
+    assert len(signals2) == 1
 
 
 @pytest.mark.asyncio

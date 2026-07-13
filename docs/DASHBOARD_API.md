@@ -487,6 +487,27 @@ Strategy won't generate new entry signals until resumed.
 }
 ```
 
+#### `fire_straddle` — Fire a short straddle NOW (manual)
+
+```json
+{
+  "type": "fire_straddle",
+  "payload": {
+    "strategy_id": "xsp_straddle_manual"
+  }
+}
+```
+
+Operator-triggered straddle via the dashboard "Fire Straddle" button. One
+command = one straddle: the runner calls the straddle provider's
+`emit_now()`, which runs the normal chain-scan / strike-selection / sizing
+but skips the schedule gates (entry_time, once-per-day). `strategy_id`
+defaults to `xsp_straddle_manual`, a dedicated strategy that never fires on
+its own. Still enforced: system lock, entry-window exit-time bound
+(rejected after 15:30 ET), wait-until-flat (previous manual straddle must
+be closed), daily loss limit, spread checks, risk sizing. Positions get the
+strategy's normal 30% per-leg stop-loss and 15:30 ET time-exit.
+
 ---
 
 ## Error Handling

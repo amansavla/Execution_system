@@ -5,7 +5,7 @@
 global:
   trading_mode: "paper"              # paper | live | disabled
   daily_loss_limit: 5000.00          # USD, across all strategies
-  max_open_positions: 10             # total across all strategies
+  max_open_positions: 20             # total across all strategies
   max_open_orders: 20                # total across all strategies
   max_contracts_per_trade: 10
   max_premium_per_trade: 2000.00     # USD
@@ -19,7 +19,9 @@ per_strategy:
   max_positions: 3                   # per strategy
 
 per_underlying:
-  max_positions: 5                   # per underlying symbol
+  max_positions: 15                  # per underlying symbol (raised 5->15
+                                     # 2026-06-15: all strategies trade XSP,
+                                     # so 5 starved the straddles + 5EMA)
 
 spread_limits:
   max_spread_pct: 15.0               # max bid-ask spread as % of mid

@@ -40,3 +40,14 @@ class CompositeStrategyProvider(StrategyProvider):
         if not provider or not hasattr(provider, "collect_exits"):
             return set()
         return await provider.collect_exits(strategy_config, current_time)
+
+    async def emit_now(self, strategy_config: StrategyConfig, current_time: datetime) -> list[StrategySignal]:
+        """Route an operator-triggered immediate emission (dashboard fire button)."""
+        provider = self.providers.get(strategy_config.entry.signal_source)
+        if not provider or not hasattr(provider, "emit_now"):
+            logger.warning(
+                "Signal source '%s' has no emit_now (strategy: %s) — manual fire ignored",
+                strategy_config.entry.signal_source, strategy_config.strategy_id,
+            )
+            return []
+        return await provider.emit_now(strategy_config, current_time)

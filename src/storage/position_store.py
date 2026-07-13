@@ -201,6 +201,48 @@ class PositionStore:
         finally:
             self._close(conn)
 
+    def find_all_open_attributions(
+        self, symbol: str, expiry: str, strike: float, right: str
+    ) -> list[dict]:
+        """Find ALL OPEN/OPENING rows matching a contract identity.
+
+        Unlike find_open_attribution (which returns only the most-recently
+        updated row), this returns every match. Needed because the broker
+        reports one NET quantity per contract, but two strategies can
+        independently hold the SAME contract (e.g. two straddles picking
+        identical strikes the same day) — collapsing onto a single row on
+        restart double-counts one strategy's exposure onto the other's
+        (measured 2026-07-01: 18 tracked vs 12 actual broker contracts).
+        """
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                """
+                SELECT position_id, strategy_id, entry_time, avg_entry_price, side, quantity
+                FROM position_attribution
+                WHERE symbol = ? AND expiry = ? AND strike = ? AND right = ?
+                  AND status IN ('OPEN', 'OPENING', 'open', 'opening')
+                ORDER BY updated_at DESC
+                """,
+                (symbol, expiry, float(strike), right),
+            )
+            return [
+                {
+                    "position_id": row[0],
+                    "strategy_id": row[1],
+                    "entry_time": row[2],
+                    "avg_entry_price": row[3],
+                    "side": row[4],
+                    "quantity": row[5],
+                }
+                for row in cur.fetchall()
+            ]
+        except Exception as e:
+            logger.error("PositionStore lookup failed: %s", e)
+            return []
+        finally:
+            self._close(conn)
+
     def strategies_traded_on(self, ny_date_iso: str) -> set[str]:
         """Strategy IDs with ANY position whose entry_time falls on the given
         America/New_York calendar date (any status).
