@@ -264,6 +264,10 @@ class ExecutionRunner:
         # Order manager
         self.order_manager = OrderManager(self.broker, self.event_store)
 
+        # Net broker commissions into position realized P&L (dashboard P&L
+        # was gross while IBKR reports net — $177.54 apart on 2026-07-13).
+        self.broker.register_commission_callback(self._on_commission)
+
         # Exit manager
         self.exit_manager = ExitManager(self.event_store)
 
@@ -1716,6 +1720,31 @@ class ExecutionRunner:
 
         # Replace the broker fill callback
         self.broker._fill_callbacks = [_fill_and_position]
+
+    def _on_commission(self, order_id: UUID, commission: float) -> None:
+        """Net a per-execution broker commission into its position's P&L.
+
+        Called by the broker on each CommissionReport (arrives after the
+        fill has been applied). Matches the order to a position via
+        entry_order_id / exit_order_ids and subtracts the commission, so
+        dashboard realized P&L is net like IBKR's. Cumulative amount is
+        kept in position metadata for auditability.
+        """
+        for pos in self.position_manager.positions.values():
+            if pos.entry_order_id == order_id or order_id in pos.exit_order_ids:
+                pos.realized_pnl -= commission
+                pos.metadata["commission_paid"] = round(
+                    pos.metadata.get("commission_paid", 0.0) + commission, 6
+                )
+                try:
+                    self.position_store.upsert_position(pos)
+                except Exception as e:
+                    logger.error("Commission persist failed for %s: %s", pos.position_id, e)
+                return
+        logger.warning(
+            "Commission $%.2f for order %s could not be matched to a position",
+            commission, order_id,
+        )
 
     async def _seed_positions_from_broker(self) -> None:
         """Seed PositionManager from broker positions on startup.

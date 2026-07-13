@@ -114,6 +114,23 @@ the fixes show up in the numbers:
 - Slippage remains small in absolute terms (avg ≈ $0.02–0.05/contract on
   $1–3.5 premiums); percentage figures look big only because premiums are small.
 
+
+### 5. Dashboard P&L overstated vs IBKR — commissions not tracked (07-13, FIXED)
+- Measured 2026-07-13: IBKR net realized $877.46 vs dashboard $1,028.30.
+  Dominant cause: our realized_pnl was GROSS; IBKR reports net of
+  commissions ($177.54 that day, ~$0.60–1.20/contract). Residual ~$27:
+  per-strategy attribution vs IBKR FIFO netting on shared contracts, and
+  seeded positions importing broker avgCost (commission-contaminated) as
+  entry price.
+- Fix: broker hooks `commissionReportEvent` (deduped by execId, logged as
+  `commission_report` events); runner nets each commission into the matched
+  position's realized_pnl and records cumulative `commission_paid` in
+  position metadata. Dashboard P&L is now net and directly comparable to
+  IBKR. Mock/stub brokers inherit a no-op registration.
+- Files: `src/broker/ibkr_broker.py`, `src/broker/interface.py`,
+  `src/app/runner.py`. Tests: `tests/unit/test_commission_netting.py`.
+  Note: takes effect from the next session's fills; historical rows stay gross.
+
 ## Known open issues (priority order)
 
 1. **In-place-modify repricer race (Error 104 → 201 → 202)** — the

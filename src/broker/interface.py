@@ -116,6 +116,14 @@ class BrokerClient(ABC):
         """Register a callback for streaming quote updates."""
         pass
 
+    def register_commission_callback(self, callback: Callable) -> None:
+        """Register a callback receiving (order_id, commission) per execution.
+
+        Optional — brokers without per-execution commission reporting (mock,
+        stubs) inherit this no-op; position P&L stays gross for them.
+        """
+        return None
+
     @abstractmethod
     async def get_historical_close(self, symbol: str, end_time: datetime) -> Optional[float]:
         """Fetch historical close price for a symbol ending at the specified datetime."""

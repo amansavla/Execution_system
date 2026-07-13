@@ -63,6 +63,11 @@ class IBKRBrokerClient(BrokerClient):
         self._order_callbacks: list[Callable[[OrderState, OrderEvent], None]] = []
         self._fill_callbacks: list[Callable[[FillEvent], None]] = []
         self._quote_callbacks: list[Callable[[QuoteSnapshot], None]] = []
+        # (order_id, commission) per commission report — lets the runner
+        # net commissions into position realized P&L. Dashboard P&L was
+        # gross while IBKR reports net: $177.54 apart on 2026-07-13 alone.
+        self._commission_callbacks: list[Callable] = []
+        self._seen_commission_exec_ids: set[str] = set()
 
         # Maps broker_order_id (str) -> dict of internal order metadata
         self._order_metadata: dict[str, dict] = {}
@@ -126,6 +131,7 @@ class IBKRBrokerClient(BrokerClient):
         # Connect event handlers
         self.ib.orderStatusEvent += self._on_order_status
         self.ib.execDetailsEvent += self._on_exec_details
+        self.ib.commissionReportEvent += self._on_commission_report
         self.ib.pendingTickersEvent += self._on_pending_ticker
         self.ib.disconnectedEvent += self._on_disconnected
 
@@ -908,6 +914,49 @@ class IBKRBrokerClient(BrokerClient):
                 cb(fill_event)
             except Exception as e:
                 logger.error("Error in fill callback execution: %s", e)
+
+    def _on_commission_report(self, trade, fill, report) -> None:
+        """Forward per-execution commissions to registered callbacks.
+
+        IBKR sends the CommissionReport as a separate message shortly AFTER
+        execDetails, so it can't ride the FillEvent — by the time it
+        arrives, the fill has already been applied to the position. The
+        runner nets it into that position's realized_pnl instead.
+        """
+        exec_id = getattr(fill.execution, "execId", None)
+        if exec_id and exec_id in self._seen_commission_exec_ids:
+            return  # duplicate report (reconnect replay)
+        broker_order_id = str(fill.execution.orderId)
+        metadata = self._order_metadata.get(broker_order_id)
+        if not metadata:
+            return
+        commission = float(getattr(report, "commission", 0.0) or 0.0)
+        if commission <= 0:
+            return
+        if exec_id:
+            self._seen_commission_exec_ids.add(exec_id)
+
+        # IBKR uses a sentinel huge value for "no realized PnL on this exec"
+        broker_rpnl = getattr(report, "realizedPNL", None)
+        if broker_rpnl is not None and abs(broker_rpnl) > 1e11:
+            broker_rpnl = None
+
+        self.event_store.log_callback("commission_report", {
+            "order_id": str(metadata["order_id"]),
+            "strategy_id": metadata["strategy_id"],
+            "exec_id": exec_id,
+            "commission": commission,
+            "broker_realized_pnl": broker_rpnl,
+        })
+        for cb in self._commission_callbacks:
+            try:
+                cb(metadata["order_id"], commission)
+            except Exception as e:
+                logger.error("Error in commission callback execution: %s", e)
+
+    def register_commission_callback(self, callback: Callable) -> None:
+        """Register a callback receiving (order_id, commission) per execution."""
+        self._commission_callbacks.append(callback)
 
     @staticmethod
     def _is_regular_trading_hours() -> bool:
